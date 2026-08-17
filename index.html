@@ -1,0 +1,309 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Order Update</title>
+<meta name="theme-color" content="#0f172a">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="stylesheet" href="style.css">
+<script src="https://accounts.google.com/gsi/client" async defer></script>
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand">
+    <span class="signal">
+      <i style="height:35%"></i><i style="height:55%"></i><i style="height:75%"></i><i style="height:100%"></i>
+    </span>
+    <span class="brand-text">Order Update</span>
+  </div>
+  <div class="auth-area">
+    <div id="adminToolsBtns" class="hidden">
+      <button id="techniciansBtn" class="icon-btn" title="Manage technicians" aria-label="Manage technicians">👤</button>
+      <button id="pendingEditsBtn" class="icon-btn" title="Pending edits" aria-label="Pending edits">
+        📝<span id="pendingBadge" class="badge hidden">0</span>
+      </button>
+      <button id="ordersDashboardBtn" class="icon-btn" title="Orders dashboard" aria-label="Orders dashboard">📊</button>
+    </div>
+    <button id="settingsBtn" class="icon-btn" title="Settings" aria-label="Settings">⚙</button>
+    <div id="signedOut">
+      <button id="signInBtn" class="btn primary small">Sign in</button>
+    </div>
+    <div id="signedIn" class="hidden">
+      <button id="signOutBtn" class="btn ghost small">Sign out</button>
+    </div>
+    <div id="techSignedIn" class="hidden">
+      <span id="techWhoAmI" class="muted small-label"></span>
+      <button id="techSignOutBtn" class="btn ghost small">Sign out</button>
+    </div>
+  </div>
+</header>
+
+<main id="app">
+
+  <!-- SIGN IN GATE -->
+  <section id="signInGate" class="panel center hidden">
+    <div class="gate-signal">
+      <i style="height:35%"></i><i style="height:55%"></i><i style="height:75%"></i><i style="height:100%"></i>
+    </div>
+    <h1>Update field orders</h1>
+
+    <div class="role-tabs">
+      <button type="button" id="roleTabAdmin" class="role-tab active">Admin</button>
+      <button type="button" id="roleTabTech" class="role-tab">Technician</button>
+    </div>
+
+    <div id="adminSignInPanel">
+      <section id="setupNotice" class="panel notice hidden" style="text-align:left">
+        <h2>One-time setup needed</h2>
+        <p>Open <strong>Settings</strong> (⚙ top right) and enter your Google OAuth Client ID, Spreadsheet ID, and the writable tab name. See the README for how to get these.</p>
+      </section>
+      <p class="muted">Sign in with the Google account that owns your order spreadsheet.</p>
+      <button id="signInBtn2" class="btn primary">Sign in with Google</button>
+    </div>
+
+    <form id="techLoginForm" class="hidden tech-login-form">
+      <p class="muted">Sign in with the username and password your admin gave you.</p>
+      <div class="field">
+        <input id="techUsername" type="text" placeholder="Username" autocomplete="username" autocapitalize="off">
+      </div>
+      <div class="field">
+        <input id="techPassword" type="password" placeholder="Password" autocomplete="current-password">
+      </div>
+      <button type="submit" class="btn primary">Sign in</button>
+      <div id="techLoginStatus" class="status-line"></div>
+    </form>
+  </section>
+
+  <!-- TECHNICIAN APP -->
+  <section id="techApp" class="hidden">
+    <section class="panel">
+      <form id="techSearchForm" class="search-row">
+        <input id="techOrderIdInput" type="text" placeholder="Order number e.g. 02576395" autocomplete="off" inputmode="numeric">
+        <button type="submit" class="btn primary">Find</button>
+      </form>
+      <div id="techSearchStatus" class="status-line"></div>
+      <div id="techMatchesList" class="tab-list hidden"></div>
+    </section>
+
+    <section class="panel">
+      <h2 class="picker-title">My Orders</h2>
+      <div id="techStatusTabs" class="status-tabs"></div>
+      <div id="techStatusOrdersList" class="tab-list"></div>
+    </section>
+
+    <section id="techOrderCard" class="panel hidden">
+      <div class="order-head">
+        <div>
+          <div class="eyebrow" id="techOrderTeam">—</div>
+          <h2 id="techOrderName">—</h2>
+        </div>
+        <span class="status-pill" id="techStatusPill">—</span>
+      </div>
+      <p class="hint">Your previous update is shown below. The update box is empty for a new update. Every submission requires admin approval.</p>
+      <dl class="meta-grid">
+        <div><dt>Order ID</dt><dd id="techMetaOrderId">—</dd></div>
+        <div><dt>RL</dt><dd id="techMetaRl">—</dd></div>
+        <div><dt>GSM</dt><dd id="techMetaGsm">—</dd></div>
+        <div><dt>POP</dt><dd id="techMetaPop">—</dd></div>
+        <div><dt>Type</dt><dd id="techMetaType">—</dd></div>
+        <div><dt>Create Date</dt><dd id="techMetaDate">—</dd></div>
+      </dl>
+      <div class="field">
+        <label>Last update</label>
+        <div id="techLastUpdate" class="readonly-value">No previous update</div>
+      </div>
+      <form id="techEditForm">
+        <div class="field">
+          <label for="techCurrentStatus">New status</label>
+          <select id="techCurrentStatus"></select>
+        </div>
+        <div class="field">
+          <label for="techDescInput">New update</label>
+          <textarea id="techDescInput" rows="4" placeholder="Letters and numbers only; use one space between words" maxlength="500"></textarea>
+        </div>
+        <div class="actions">
+          <button type="button" id="techCancelBtn" class="btn ghost">Cancel</button>
+          <button type="submit" id="techSubmitBtn" class="btn primary">Submit for approval</button>
+        </div>
+        <div id="techSubmitStatus" class="status-line"></div>
+      </form>
+    </section>
+
+    <section class="panel">
+      <h2 class="picker-title">Your recent submissions</h2>
+      <div id="techMyEditsList" class="tab-list"></div>
+    </section>
+  </section>
+
+  <!-- SEARCH -->
+  <section id="searchSection" class="panel hidden">
+    <form id="searchForm" class="search-row">
+      <input id="orderIdInput" type="text" placeholder="Order number e.g. 02576395" autocomplete="off" inputmode="numeric">
+      <button type="submit" class="btn primary">Find</button>
+    </form>
+    <div id="searchStatus" class="status-line"></div>
+  </section>
+
+  <!-- TAB PICKER (shown when order found in 2+ tabs) -->
+  <section id="tabPicker" class="panel hidden">
+    <h2 class="picker-title">Found in multiple tabs — pick one</h2>
+    <div id="tabPickerList" class="tab-list"></div>
+  </section>
+
+  <!-- ORDER CARD -->
+  <section id="orderCard" class="panel hidden">
+    <div class="order-head">
+      <div>
+        <div class="eyebrow" id="orderTeam">—</div>
+        <h2 id="orderName">—</h2>
+      </div>
+      <span class="status-pill" id="statusPillPreview">—</span>
+    </div>
+
+    <div id="readOnlyNotice" class="readonly-notice hidden">
+      View only — found in <strong id="readOnlyTabName">—</strong>. Only the
+      <strong id="writableTabLabel">—</strong> tab can be updated.
+    </div>
+
+    <dl class="meta-grid">
+      <div><dt>Order ID</dt><dd id="metaOrderId">—</dd></div>
+      <div><dt>RL</dt><dd id="metaRl">—</dd></div>
+      <div><dt>GSM</dt><dd id="metaGsm">—</dd></div>
+      <div><dt>POP</dt><dd id="metaPop">—</dd></div>
+      <div><dt>Type</dt><dd id="metaType">—</dd></div>
+      <div><dt>Create Date</dt><dd id="metaDate">—</dd></div>
+    </dl>
+
+    <form id="updateForm">
+      <div class="field">
+        <label for="statusSelect">Order Status</label>
+        <input id="statusSelect" type="text" list="statusOptions" placeholder="Type or pick a status" autocomplete="off">
+        <datalist id="statusOptions"></datalist>
+        <p class="hint" style="margin:6px 0 0">Pick an existing status from the list, or type a new one — it'll be remembered next time.</p>
+      </div>
+      <div class="field">
+        <label for="descInput">Description</label>
+        <textarea id="descInput" rows="4" placeholder="Customer remarks / notes"></textarea>
+      </div>
+      <div class="actions">
+        <button type="button" id="cancelBtn" class="btn ghost">Cancel</button>
+        <button type="submit" id="saveBtn" class="btn primary">Save changes</button>
+      </div>
+      <div id="saveStatus" class="status-line"></div>
+    </form>
+  </section>
+
+</main>
+
+<!-- SETTINGS DRAWER -->
+<div id="settingsOverlay" class="overlay hidden">
+  <div class="drawer">
+    <div class="drawer-head">
+      <h2>Settings</h2>
+      <button id="closeSettings" class="icon-btn" aria-label="Close">✕</button>
+    </div>
+    <form id="settingsForm">
+      <div class="field">
+        <label for="clientIdInput">Google OAuth Client ID</label>
+        <input id="clientIdInput" type="text" placeholder="xxxx.apps.googleusercontent.com">
+      </div>
+      <div class="field">
+        <label for="sheetIdInput">Spreadsheet ID</label>
+        <input id="sheetIdInput" type="text" placeholder="Long ID from the sheet's URL">
+      </div>
+      <div class="field">
+        <label for="progressTabInput">Writable tab (only this one can be updated)</label>
+        <input id="progressTabInput" type="text" placeholder="e.g. Progress">
+      </div>
+      <p class="hint">Search scans every tab in the spreadsheet automatically. If the order shows up in more than one, you'll pick which one to view — but Save only works when the picked tab matches the writable tab name above.</p>
+      <div class="field-row">
+        <div class="field">
+          <label for="colOrderId">Order ID column</label>
+          <input id="colOrderId" type="text" value="B" maxlength="2">
+        </div>
+        <div class="field">
+          <label for="colStatus">Status column</label>
+          <input id="colStatus" type="text" value="H" maxlength="2">
+        </div>
+        <div class="field">
+          <label for="colDesc">Description column</label>
+          <input id="colDesc" type="text" value="L" maxlength="2">
+        </div>
+      </div>
+      <p class="hint">Defaults match the standard order log layout (Team, Order ID, RL, End User Name, GSM, TAG, Create Date, Order Status, GSM 2, Type, POP, Description) and are used for every tab. Adjust if a tab's columns differ.</p>
+      <button type="submit" class="btn primary">Save settings</button>
+    </form>
+  </div>
+</div>
+
+<!-- MANAGE TECHNICIANS DRAWER -->
+<div id="techniciansOverlay" class="overlay hidden">
+  <div class="drawer">
+    <div class="drawer-head">
+      <h2>Technicians</h2>
+      <button id="closeTechnicians" class="icon-btn" aria-label="Close">✕</button>
+    </div>
+    <form id="addTechForm">
+      <div class="field-row">
+        <div class="field">
+          <label for="newTechUsername">Username</label>
+          <input id="newTechUsername" type="text" autocapitalize="off">
+        </div>
+        <div class="field">
+          <label for="newTechPassword">Password</label>
+          <input id="newTechPassword" type="text">
+        </div>
+      </div>
+      <div class="field-row">
+        <div class="field">
+          <label for="newTechTeam">Team</label>
+          <input id="newTechTeam" type="text" placeholder="Must match Team column">
+        </div>
+        <div class="field">
+          <label for="newTechName">Full name</label>
+          <input id="newTechName" type="text">
+        </div>
+      </div>
+      <button type="submit" class="btn primary">Add technician</button>
+      <div id="addTechStatus" class="status-line"></div>
+    </form>
+    <h3 class="drawer-subhead">Existing</h3>
+    <div id="techniciansList" class="tab-list"></div>
+  </div>
+</div>
+
+<!-- ORDERS DASHBOARD DRAWER -->
+<div id="ordersDashboardOverlay" class="overlay hidden">
+  <div class="drawer wide-drawer">
+    <div class="drawer-head">
+      <h2>Orders dashboard</h2>
+      <button id="closeOrdersDashboard" class="icon-btn" aria-label="Close">✕</button>
+    </div>
+    <button id="refreshOrdersDashboard" type="button" class="btn ghost">↻ Refresh</button>
+    <div id="ordersDashboardContent" class="dashboard-grid"></div>
+  </div>
+</div>
+
+<!-- PENDING EDITS DRAWER -->
+<div id="pendingEditsOverlay" class="overlay hidden">
+  <div class="drawer">
+    <div class="drawer-head">
+      <h2>Pending edits</h2>
+      <button id="closePendingEdits" class="icon-btn" aria-label="Close">✕</button>
+    </div>
+    <button id="refreshPendingEdits" type="button" class="btn ghost">↻ Refresh</button>
+    <div id="pendingEditsList" class="tab-list"></div>
+  </div>
+</div>
+
+<div id="toast" class="toast hidden"></div>
+
+<script src="app.js"></script>
+</body>
+</html>
