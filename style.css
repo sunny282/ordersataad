@@ -445,6 +445,21 @@ textarea { resize: vertical; }
   cursor: pointer;
 }
 
+/* ===== Install app banner ===== */
+.install-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 14px;
+  background: var(--bg-elev);
+  border-bottom: 1px solid var(--border);
+  color: var(--text);
+  font-size: 13px;
+}
+.install-banner-actions { display: flex; align-items: center; gap: 6px; flex: 0 0 auto; }
+.install-banner .btn.small { padding: 6px 12px; font-size: 12px; }
+
 /* v2.1 admin/technician workflow additions */
 .wide-drawer { max-width: 900px; }
 .dashboard-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(240px,1fr)); gap:12px; margin-top:14px; }

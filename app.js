@@ -1120,10 +1120,63 @@ async function resolveEdit(editId, decision) {
   }
 }
 
+/* ===== Install app banner (Android/desktop: beforeinstallprompt; iOS: manual hint) ===== */
+const INSTALL_DISMISSED_KEY = 'orderUpdateInstallDismissed';
+let deferredInstallPrompt = null;
+
+function isStandaloneDisplay() {
+  return window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
+}
+function isIOSDevice() {
+  return /iphone|ipad|ipod/i.test(navigator.userAgent) && !window.MSStream;
+}
+
+const installBanner = el('installBanner');
+
+// Fires on Android Chrome / desktop Chrome-family browsers when the app is
+// installable. Listen at top level (not inside window.load) since this can
+// fire before the load event.
+window.addEventListener('beforeinstallprompt', (e) => {
+  e.preventDefault();
+  deferredInstallPrompt = e;
+  if (isStandaloneDisplay() || localStorage.getItem(INSTALL_DISMISSED_KEY)) return;
+  el('installHintText').textContent = 'Install this app for quick access from your home screen.';
+  el('installBtn').classList.remove('hidden');
+  installBanner.classList.remove('hidden');
+});
+
+el('installBtn').addEventListener('click', async () => {
+  if (!deferredInstallPrompt) return;
+  installBanner.classList.add('hidden');
+  deferredInstallPrompt.prompt();
+  await deferredInstallPrompt.userChoice.catch(() => {});
+  deferredInstallPrompt = null;
+});
+
+el('dismissInstallBtn').addEventListener('click', () => {
+  installBanner.classList.add('hidden');
+  localStorage.setItem(INSTALL_DISMISSED_KEY, '1');
+});
+
+window.addEventListener('appinstalled', () => {
+  installBanner.classList.add('hidden');
+  deferredInstallPrompt = null;
+});
+
+// iOS Safari has no install prompt API at all — Add to Home Screen is only
+// reachable through the Share sheet, so just point people at it.
+function maybeShowIOSInstallHint() {
+  if (!isIOSDevice() || isStandaloneDisplay() || localStorage.getItem(INSTALL_DISMISSED_KEY)) return;
+  el('installBtn').classList.add('hidden');
+  el('installHintText').textContent = 'Install this app: tap the Share icon, then "Add to Home Screen".';
+  installBanner.classList.remove('hidden');
+}
+
 /* ===== Boot ===== */
 window.addEventListener('load', () => {
   restoreAdminSession(); // instant — no need to wait for the Google script
   refreshView();
+  maybeShowIOSInstallHint();
   if (accessToken) loadKnownStatuses();
   if (techToken) {
     loadMyEdits();
