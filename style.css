@@ -423,6 +423,28 @@ textarea { resize: vertical; }
 .pill.rejected { background: rgba(248, 113, 113, 0.15); color: var(--danger); }
 .pill.inactive { background: rgba(148, 163, 184, 0.15); color: var(--muted); }
 
+/* ===== Appearance drawer (theme color pickers) ===== */
+.theme-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border);
+}
+.theme-row:last-child { border-bottom: none; }
+.theme-row-label { font-size: 13px; }
+.theme-row-label .theme-row-var { display: block; font-size: 11px; color: var(--muted); }
+.theme-row input[type="color"] {
+  width: 44px;
+  height: 32px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: none;
+  cursor: pointer;
+}
+
 /* v2.1 admin/technician workflow additions */
 .wide-drawer { max-width: 900px; }
 .dashboard-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(240px,1fr)); gap:12px; margin-top:14px; }

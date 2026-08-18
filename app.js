@@ -21,6 +21,42 @@ function saveConfig(cfg) {
 }
 let config = loadConfig();
 
+/* ===== Appearance (admin: colors/background) ===== */
+const THEME_KEY = 'orderUpdateTheme';
+const THEME_VARS = [
+  { key: '--bg', label: 'Page background' },
+  { key: '--bg-elev', label: 'Panel background' },
+  { key: '--bg-card', label: 'Card background' },
+  { key: '--border', label: 'Borders' },
+  { key: '--text', label: 'Text' },
+  { key: '--muted', label: 'Muted / hint text' },
+  { key: '--accent', label: 'Accent (buttons, highlights)' },
+  { key: '--accent-dim', label: 'Accent (hover state)' },
+  { key: '--ok', label: 'Success' },
+  { key: '--warn', label: 'Warning' },
+  { key: '--danger', label: 'Danger' }
+];
+
+function loadThemeOverrides() {
+  try { return JSON.parse(localStorage.getItem(THEME_KEY)) || {}; } catch (e) { return {}; }
+}
+function applyTheme() {
+  const stored = loadThemeOverrides();
+  Object.entries(stored).forEach(([key, value]) => {
+    document.documentElement.style.setProperty(key, value);
+  });
+}
+function saveThemeOverride(key, value) {
+  const stored = loadThemeOverrides();
+  stored[key] = value;
+  localStorage.setItem(THEME_KEY, JSON.stringify(stored));
+}
+function resetTheme() {
+  localStorage.removeItem(THEME_KEY);
+  THEME_VARS.forEach((v) => document.documentElement.style.removeProperty(v.key));
+}
+applyTheme(); // apply any saved overrides immediately, before the rest of the app boots
+
 /* ===== Column letter helpers ===== */
 function colToIndex(letter) {
   letter = (letter || 'A').toUpperCase();
@@ -918,6 +954,43 @@ el('addTechForm').addEventListener('submit', async (e) => {
     status.textContent = err.message;
     status.className = 'status-line err';
   }
+});
+
+/* ---- Appearance drawer ---- */
+const themeOverlay = el('themeOverlay');
+el('themeBtn').addEventListener('click', () => {
+  themeOverlay.classList.remove('hidden');
+  renderThemeFields();
+});
+el('closeTheme').addEventListener('click', () => themeOverlay.classList.add('hidden'));
+themeOverlay.addEventListener('click', (e) => {
+  if (e.target === themeOverlay) themeOverlay.classList.add('hidden');
+});
+
+function renderThemeFields() {
+  const wrap = el('themeFields');
+  wrap.innerHTML = '';
+  const computed = getComputedStyle(document.documentElement);
+  THEME_VARS.forEach((v) => {
+    const current = computed.getPropertyValue(v.key).trim() || '#000000';
+    const row = document.createElement('div');
+    row.className = 'theme-row';
+    row.innerHTML = `
+      <span class="theme-row-label">${v.label}<span class="theme-row-var">${v.key}</span></span>
+      <input type="color" value="${current}">
+    `;
+    row.querySelector('input').addEventListener('input', (e) => {
+      document.documentElement.style.setProperty(v.key, e.target.value);
+      saveThemeOverride(v.key, e.target.value);
+    });
+    wrap.appendChild(row);
+  });
+}
+
+el('resetThemeBtn').addEventListener('click', () => {
+  resetTheme();
+  renderThemeFields();
+  toast('Appearance reset to default');
 });
 
 /* ---- Admin orders dashboard ---- */

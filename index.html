@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Order Update</title>
+<title>Order Update By Saqlain</title>
 <meta name="theme-color" content="#0f172a">
 <link rel="manifest" href="manifest.json">
 <link rel="icon" href="icons/icon-192.png">
@@ -29,6 +29,7 @@
         📝<span id="pendingBadge" class="badge hidden">0</span>
       </button>
       <button id="ordersDashboardBtn" class="icon-btn" title="Orders dashboard" aria-label="Orders dashboard">📊</button>
+      <button id="themeBtn" class="icon-btn" title="Appearance" aria-label="Appearance">🎨</button>
     </div>
     <button id="settingsBtn" class="icon-btn" title="Settings" aria-label="Settings">⚙</button>
     <div id="signedOut">
@@ -129,7 +130,7 @@
         </div>
         <div class="actions">
           <button type="button" id="techCancelBtn" class="btn ghost">Cancel</button>
-          <button type="submit" id="techSubmitBtn" class="btn primary">Submit for approval</button>
+          <button type="submit" id="techSubmitBtn" class="btn primary">Submit</button>
         </div>
         <div id="techSubmitStatus" class="status-line"></div>
       </form>
@@ -275,6 +276,21 @@
     </form>
     <h3 class="drawer-subhead">Existing</h3>
     <div id="techniciansList" class="tab-list"></div>
+  </div>
+</div>
+
+<!-- APPEARANCE DRAWER (admin: colors/background) -->
+<div id="themeOverlay" class="overlay hidden">
+  <div class="drawer">
+    <div class="drawer-head">
+      <h2>Appearance</h2>
+      <button id="closeTheme" class="icon-btn" aria-label="Close">✕</button>
+    </div>
+    <p class="hint">Changes apply instantly and are saved on this device (this browser only — other devices keep their own).</p>
+    <div id="themeFields"></div>
+    <div class="actions">
+      <button type="button" id="resetThemeBtn" class="btn ghost">Reset to default</button>
+    </div>
   </div>
 </div>
 
