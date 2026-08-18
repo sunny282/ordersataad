@@ -184,9 +184,8 @@
     <form id="updateForm">
       <div class="field">
         <label for="statusSelect">Order Status</label>
-        <input id="statusSelect" type="text" list="statusOptions" placeholder="Type or pick a status" autocomplete="off">
-        <datalist id="statusOptions"></datalist>
-        <p class="hint" style="margin:6px 0 0">Pick an existing status from the list, or type a new one — it'll be remembered next time.</p>
+        <select id="statusSelect"></select>
+        <p class="hint" style="margin:6px 0 0">Pick a status from the list. New statuses can be added from the Technicians/status data in the sheet.</p>
       </div>
       <div class="field">
         <label for="descInput">Description</label>

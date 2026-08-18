@@ -252,10 +252,11 @@ async function getAllTabNames() {
   return (data.sheets || []).map((s) => s.properties.title);
 }
 
-// Populates the admin status datalist with every distinct, non-empty value
-// currently in the writable tab's Status column — so the field always
-// reflects real statuses in use, including ones typed in by hand, without
-// needing a hardcoded list anywhere.
+// Populates the admin status dropdown with the standard status list plus
+// any other distinct, non-empty values already used in the writable tab's
+// Status column — so older/custom statuses already in the sheet still show
+// up even if they're not in the standard list.
+let adminKnownStatuses = [];
 async function loadKnownStatuses() {
   if (!accessToken || !config.sheetId || !config.progressTab) return;
   try {
@@ -263,9 +264,18 @@ async function loadKnownStatuses() {
     const url = `${SHEETS_BASE}/${config.sheetId}/values/${range}`;
     const data = await apiGet(url);
     const values = (data.values || []).map((r) => (r[0] || '').toString().trim()).filter(Boolean);
-    const unique = [...new Set(values)].sort((a, b) => a.localeCompare(b));
-    el('statusOptions').innerHTML = unique.map((s) => `<option value="${escapeHtml(s)}"></option>`).join('');
-  } catch (e) { /* ignore — datalist is a nicety, not critical */ }
+    const extra = [...new Set(values)].filter((s) => !STATUS_LIST.includes(s)).sort((a, b) => a.localeCompare(b));
+    adminKnownStatuses = [...STATUS_LIST, ...extra];
+    populateStatusSelect(el('statusSelect').value);
+  } catch (e) { /* ignore — dropdown just falls back to the standard list */ }
+}
+
+function populateStatusSelect(current) {
+  const select = el('statusSelect');
+  const options = adminKnownStatuses.length ? adminKnownStatuses : STATUS_LIST;
+  const full = current && !options.includes(current) ? [...options, current] : options;
+  select.innerHTML = full.map((s) => `<option value="${escapeHtml(s)}">${escapeHtml(s)}</option>`).join('');
+  if (current) select.value = current;
 }
 
 async function batchGetAllTabs(tabNames) {
@@ -382,7 +392,7 @@ function populateOrderCard(rowNum, row) {
 
   const status = cellAt(row, config.colStatus) || '';
   el('statusPillPreview').textContent = status || '—';
-  el('statusSelect').value = status;
+  populateStatusSelect(status);
   el('descInput').value = cellAt(row, config.colDesc) || '';
 
   el('saveStatus').textContent = '';
