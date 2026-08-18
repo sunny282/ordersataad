@@ -1052,13 +1052,14 @@ window.addEventListener('load', () => {
       if (window.google && google.accounts) {
         initAuth();
         clearInterval(t);
-        if (!accessToken) {
-          // Cached token was missing/expired — try a silent, popup-free
-          // refresh in case the browser still has an active Google session.
-          // Fails quietly and just leaves the sign-in gate up if not.
-          silentAuthAttempt = true;
-          tokenClient.requestAccessToken({ prompt: '' });
-        }
+        // Don't auto-request a token here. Google Identity Services opens
+        // an actual popup window for every requestAccessToken() call —
+        // prompt:'' only controls what happens inside that popup, not
+        // whether one opens — so doing this on every page load caused a
+        // Google popup to flash on every reload. If the cached admin
+        // session restored above is still valid we're already signed in;
+        // otherwise the normal Sign in button is shown and only opens a
+        // popup when the user actually clicks it.
       }
     }, 150);
   }
