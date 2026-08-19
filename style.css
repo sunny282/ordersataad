@@ -74,9 +74,17 @@ body {
 .icon-btn:hover { color: var(--text); border-color: var(--accent-dim); }
 
 main#app {
+  padding: 20px 16px 60px;
+}
+
+/* Sign-in screen and the technician app are single-column flows that stay
+ * readable at a fixed width even on wide screens. The admin/coordinator
+ * home layout (search + dashboard) is handled separately below so it can
+ * actually use the space on a laptop/desktop instead of floating in a
+ * narrow centered column. */
+#signInGate, #techApp {
   max-width: 560px;
   margin: 0 auto;
-  padding: 20px 16px 60px;
 }
 
 .panel {
@@ -519,6 +527,8 @@ textarea { resize: vertical; }
   display: flex;
   flex-direction: column;
   gap: 16px;
+  max-width: 1600px;
+  margin: 0 auto;
 }
 .dashboard-panel { display: flex; flex-direction: column; }
 .dashboard-panel-head {
@@ -532,8 +542,13 @@ textarea { resize: vertical; }
 
 @media (min-width: 900px) {
   .home-layout { flex-direction: row; align-items: flex-start; }
-  .dashboard-panel { flex: 0 0 340px; position: sticky; top: 12px; max-height: calc(100vh - 24px); overflow-y: auto; }
+  .dashboard-panel { flex: 0 0 380px; position: sticky; top: 12px; max-height: calc(100vh - 24px); overflow-y: auto; }
   .home-main { flex: 1; min-width: 0; }
+}
+
+@media (min-width: 1300px) {
+  .dashboard-panel { flex-basis: 420px; }
+  .meta-grid { grid-template-columns: 1fr 1fr 1fr; }
 }
 
 /* Clickable status rows in the dashboard panel that expand into an order list */
