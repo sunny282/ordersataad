@@ -1,4 +1,4 @@
-const CACHE_NAME = 'order-update-v9';
+const CACHE_NAME = 'order-update-v11';
 const APP_SHELL = [
   './',
   './index.html',

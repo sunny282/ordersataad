@@ -32,11 +32,13 @@
   </div>
   <div class="auth-area">
     <div id="adminToolsBtns" class="hidden">
-      <button id="techniciansBtn" class="icon-btn" title="Manage technicians" aria-label="Manage technicians">👤</button>
+      <button id="techniciansBtn" class="icon-btn admin-only" title="Manage technicians" aria-label="Manage technicians">👤</button>
+      <button id="coordinatorsBtn" class="icon-btn admin-only" title="Manage coordinators" aria-label="Manage coordinators">🧑‍💼</button>
+      <button id="teamsBtn" class="icon-btn admin-only" title="Manage teams" aria-label="Manage teams">🏷️</button>
+      <button id="permissionsBtn" class="icon-btn admin-only" title="Manage statuses" aria-label="Manage statuses">🔒</button>
       <button id="pendingEditsBtn" class="icon-btn" title="Pending edits" aria-label="Pending edits">
         📝<span id="pendingBadge" class="badge hidden">0</span>
       </button>
-      <button id="ordersDashboardBtn" class="icon-btn" title="Orders dashboard" aria-label="Orders dashboard">📊</button>
       <button id="themeBtn" class="icon-btn" title="Appearance" aria-label="Appearance">🎨</button>
     </div>
     <button id="settingsBtn" class="icon-btn" title="Settings" aria-label="Settings">⚙</button>
@@ -49,6 +51,10 @@
     <div id="techSignedIn" class="hidden">
       <span id="techWhoAmI" class="muted small-label"></span>
       <button id="techSignOutBtn" class="btn ghost small">Sign out</button>
+    </div>
+    <div id="coordSignedIn" class="hidden">
+      <span id="coordWhoAmI" class="muted small-label"></span>
+      <button id="coordSignOutBtn" class="btn ghost small">Sign out</button>
     </div>
   </div>
 </header>
@@ -65,6 +71,7 @@
     <div class="role-tabs">
       <button type="button" id="roleTabAdmin" class="role-tab active">Admin</button>
       <button type="button" id="roleTabTech" class="role-tab">Technician</button>
+      <button type="button" id="roleTabCoord" class="role-tab">Coordinator</button>
     </div>
 
     <div id="adminSignInPanel">
@@ -86,6 +93,18 @@
       </div>
       <button type="submit" class="btn primary">Sign in</button>
       <div id="techLoginStatus" class="status-line"></div>
+    </form>
+
+    <form id="coordLoginForm" class="hidden tech-login-form">
+      <p class="muted">Sign in with the username and password your admin gave you.</p>
+      <div class="field">
+        <input id="coordUsername" type="text" placeholder="Username" autocomplete="username" autocapitalize="off">
+      </div>
+      <div class="field">
+        <input id="coordPassword" type="password" placeholder="Password" autocomplete="current-password">
+      </div>
+      <button type="submit" class="btn primary">Sign in</button>
+      <div id="coordLoginStatus" class="status-line"></div>
     </form>
   </section>
 
@@ -114,7 +133,7 @@
         </div>
         <span class="status-pill" id="techStatusPill">—</span>
       </div>
-      <p class="hint">Your previous update is shown below. The update box is empty for a new update. Every submission requires admin approval.</p>
+      <p class="hint">Pick one of the options below, then add a comment — a comment is required on every submission.</p>
       <dl class="meta-grid">
         <div><dt>Order ID</dt><dd id="techMetaOrderId">—</dd></div>
         <div><dt>RL</dt><dd id="techMetaRl">—</dd></div>
@@ -127,13 +146,16 @@
         <label>Last update</label>
         <div id="techLastUpdate" class="readonly-value">No previous update</div>
       </div>
+      <div id="techViewOnlyNotice" class="readonly-notice hidden">
+        This order's status is view-only right now — no changes can be made.
+      </div>
       <form id="techEditForm">
         <div class="field">
-          <label for="techCurrentStatus">New status</label>
-          <select id="techCurrentStatus"></select>
+          <label>Choose one</label>
+          <div id="techStatusChoices" class="status-choices"></div>
         </div>
         <div class="field">
-          <label for="techDescInput">New update</label>
+          <label for="techDescInput">Comment (required)</label>
           <textarea id="techDescInput" rows="4" placeholder="Letters and numbers only; use one space between words" maxlength="500"></textarea>
         </div>
         <div class="actions">
@@ -150,62 +172,75 @@
     </section>
   </section>
 
-  <!-- SEARCH -->
-  <section id="searchSection" class="panel hidden">
-    <form id="searchForm" class="search-row">
-      <input id="orderIdInput" type="text" placeholder="Order number e.g. 02576395" autocomplete="off" inputmode="numeric">
-      <button type="submit" class="btn primary">Find</button>
-    </form>
-    <div id="searchStatus" class="status-line"></div>
-  </section>
-
-  <!-- TAB PICKER (shown when order found in 2+ tabs) -->
-  <section id="tabPicker" class="panel hidden">
-    <h2 class="picker-title">Found in multiple tabs — pick one</h2>
-    <div id="tabPickerList" class="tab-list"></div>
-  </section>
-
-  <!-- ORDER CARD -->
-  <section id="orderCard" class="panel hidden">
-    <div class="order-head">
-      <div>
-        <div class="eyebrow" id="orderTeam">—</div>
-        <h2 id="orderName">—</h2>
+  <!-- ADMIN/COORDINATOR HOME: dashboard panel + search/order area -->
+  <div id="homeLayout" class="home-layout hidden">
+    <aside id="dashboardPanel" class="panel dashboard-panel hidden">
+      <div class="dashboard-panel-head">
+        <h2 class="picker-title">Orders Dashboard</h2>
+        <button id="refreshDashboardPanel" type="button" class="icon-btn" title="Refresh" aria-label="Refresh">↻</button>
       </div>
-      <span class="status-pill" id="statusPillPreview">—</span>
+      <div id="dashboardPanelContent"><p class="muted">Loading…</p></div>
+    </aside>
+
+    <div class="home-main">
+      <!-- SEARCH -->
+      <section id="searchSection" class="panel hidden">
+        <form id="searchForm" class="search-row">
+          <input id="orderIdInput" type="text" placeholder="Order number e.g. 02576395" autocomplete="off" inputmode="numeric">
+          <button type="submit" class="btn primary">Find</button>
+        </form>
+        <div id="searchStatus" class="status-line"></div>
+      </section>
+
+      <!-- TAB PICKER (shown when order found in 2+ tabs) -->
+      <section id="tabPicker" class="panel hidden">
+        <h2 class="picker-title">Found in multiple tabs — pick one</h2>
+        <div id="tabPickerList" class="tab-list"></div>
+      </section>
+
+      <!-- ORDER CARD -->
+      <section id="orderCard" class="panel hidden">
+        <div class="order-head">
+          <div>
+            <div class="eyebrow" id="orderTeam">—</div>
+            <h2 id="orderName">—</h2>
+          </div>
+          <span class="status-pill" id="statusPillPreview">—</span>
+        </div>
+
+        <div id="readOnlyNotice" class="readonly-notice hidden">
+          View only — found in <strong id="readOnlyTabName">—</strong>. Only the
+          <strong id="writableTabLabel">—</strong> tab can be updated.
+        </div>
+
+        <dl class="meta-grid">
+          <div><dt>Order ID</dt><dd id="metaOrderId">—</dd></div>
+          <div><dt>RL</dt><dd id="metaRl">—</dd></div>
+          <div><dt>GSM</dt><dd id="metaGsm">—</dd></div>
+          <div><dt>POP</dt><dd id="metaPop">—</dd></div>
+          <div><dt>Type</dt><dd id="metaType">—</dd></div>
+          <div><dt>Create Date</dt><dd id="metaDate">—</dd></div>
+        </dl>
+
+        <form id="updateForm">
+          <div class="field">
+            <label for="statusSelect">Order Status</label>
+            <select id="statusSelect"></select>
+            <p class="hint" style="margin:6px 0 0">Pick any status — admins and coordinators aren't restricted to the technician sequence. Add a new fixed status from Manage Statuses (🔒).</p>
+          </div>
+          <div class="field">
+            <label for="descInput">Description</label>
+            <textarea id="descInput" rows="4" placeholder="Customer remarks / notes"></textarea>
+          </div>
+          <div class="actions">
+            <button type="button" id="cancelBtn" class="btn ghost">Cancel</button>
+            <button type="submit" id="saveBtn" class="btn primary">Save changes</button>
+          </div>
+          <div id="saveStatus" class="status-line"></div>
+        </form>
+      </section>
     </div>
-
-    <div id="readOnlyNotice" class="readonly-notice hidden">
-      View only — found in <strong id="readOnlyTabName">—</strong>. Only the
-      <strong id="writableTabLabel">—</strong> tab can be updated.
-    </div>
-
-    <dl class="meta-grid">
-      <div><dt>Order ID</dt><dd id="metaOrderId">—</dd></div>
-      <div><dt>RL</dt><dd id="metaRl">—</dd></div>
-      <div><dt>GSM</dt><dd id="metaGsm">—</dd></div>
-      <div><dt>POP</dt><dd id="metaPop">—</dd></div>
-      <div><dt>Type</dt><dd id="metaType">—</dd></div>
-      <div><dt>Create Date</dt><dd id="metaDate">—</dd></div>
-    </dl>
-
-    <form id="updateForm">
-      <div class="field">
-        <label for="statusSelect">Order Status</label>
-        <select id="statusSelect"></select>
-        <p class="hint" style="margin:6px 0 0">Pick a status from the list. New statuses can be added from the Technicians/status data in the sheet.</p>
-      </div>
-      <div class="field">
-        <label for="descInput">Description</label>
-        <textarea id="descInput" rows="4" placeholder="Customer remarks / notes"></textarea>
-      </div>
-      <div class="actions">
-        <button type="button" id="cancelBtn" class="btn ghost">Cancel</button>
-        <button type="submit" id="saveBtn" class="btn primary">Save changes</button>
-      </div>
-      <div id="saveStatus" class="status-line"></div>
-    </form>
-  </section>
+  </div>
 
 </main>
 
@@ -271,7 +306,7 @@
       <div class="field-row">
         <div class="field">
           <label for="newTechTeam">Team</label>
-          <input id="newTechTeam" type="text" placeholder="Must match Team column">
+          <select id="newTechTeam"></select>
         </div>
         <div class="field">
           <label for="newTechName">Full name</label>
@@ -283,6 +318,61 @@
     </form>
     <h3 class="drawer-subhead">Existing</h3>
     <div id="techniciansList" class="tab-list"></div>
+  </div>
+</div>
+
+<!-- MANAGE COORDINATORS DRAWER -->
+<div id="coordinatorsOverlay" class="overlay hidden">
+  <div class="drawer">
+    <div class="drawer-head">
+      <h2>Coordinators</h2>
+      <button id="closeCoordinators" class="icon-btn" aria-label="Close">✕</button>
+    </div>
+    <form id="addCoordForm">
+      <div class="field-row">
+        <div class="field">
+          <label for="newCoordUsername">Username</label>
+          <input id="newCoordUsername" type="text" autocapitalize="off">
+        </div>
+        <div class="field">
+          <label for="newCoordPassword">Password</label>
+          <input id="newCoordPassword" type="text">
+        </div>
+      </div>
+      <div class="field">
+        <label for="newCoordName">Full name</label>
+        <input id="newCoordName" type="text">
+      </div>
+      <div class="field">
+        <label>Teams (a coordinator can manage more than one)</label>
+        <div id="newCoordTeams" class="checkbox-list"><p class="muted">Loading teams…</p></div>
+      </div>
+      <button type="submit" class="btn primary">Add coordinator</button>
+      <div id="addCoordStatus" class="status-line"></div>
+    </form>
+    <h3 class="drawer-subhead">Existing</h3>
+    <div id="coordinatorsList" class="tab-list"></div>
+  </div>
+</div>
+
+<!-- MANAGE TEAMS DRAWER -->
+<div id="teamsOverlay" class="overlay hidden">
+  <div class="drawer">
+    <div class="drawer-head">
+      <h2>Teams</h2>
+      <button id="closeTeams" class="icon-btn" aria-label="Close">✕</button>
+    </div>
+    <p class="hint">Teams created here are what technicians and coordinators get assigned to — this is the only place new team names come from.</p>
+    <form id="addTeamForm">
+      <div class="field">
+        <label for="newTeamName">Team name</label>
+        <input id="newTeamName" type="text" placeholder="e.g. Team Alpha">
+      </div>
+      <button type="submit" class="btn primary">Add team</button>
+      <div id="addTeamStatus" class="status-line"></div>
+    </form>
+    <h3 class="drawer-subhead">Existing</h3>
+    <div id="teamsList" class="tab-list"></div>
   </div>
 </div>
 
@@ -301,15 +391,28 @@
   </div>
 </div>
 
-<!-- ORDERS DASHBOARD DRAWER -->
-<div id="ordersDashboardOverlay" class="overlay hidden">
-  <div class="drawer wide-drawer">
+<!-- MANAGE STATUSES & PERMISSIONS DRAWER -->
+<div id="permissionsOverlay" class="overlay hidden">
+  <div class="drawer">
     <div class="drawer-head">
-      <h2>Orders dashboard</h2>
-      <button id="closeOrdersDashboard" class="icon-btn" aria-label="Close">✕</button>
+      <h2>Manage Statuses</h2>
+      <button id="closePermissions" class="icon-btn" aria-label="Close">✕</button>
     </div>
-    <button id="refreshOrdersDashboard" type="button" class="btn ghost">↻ Refresh</button>
-    <div id="ordersDashboardContent" class="dashboard-grid"></div>
+    <p class="hint">This fixed sequence — not the sheet's dropdown — controls what technicians can select. From any status, a technician can only move to the next one here, or flag Problematic, or keep the current status. Reorder with the arrows; add a new fixed status below. Auto-approve and View-only apply only to technicians — coordinators and admins can always pick any status directly.</p>
+    <div id="sequenceList" class="tab-list"></div>
+    <form id="addStatusForm" class="field-row" style="margin-top:14px">
+      <div class="field" style="flex:1">
+        <label for="newStatusName">Add a fixed status (appended to the end of the sequence)</label>
+        <input id="newStatusName" type="text" placeholder="e.g. Quality Check">
+      </div>
+      <button type="submit" class="btn primary" style="align-self:flex-end">Add</button>
+    </form>
+    <div id="addStatusStatus" class="status-line"></div>
+    <h3 class="drawer-subhead">Problematic</h3>
+    <div id="problematicRow" class="tab-list"></div>
+    <h3 class="drawer-subhead">Seen in the sheet but not configured</h3>
+    <p class="hint">These show up passively on orders/dashboard but aren't selectable by technicians until you add them to the sequence above.</p>
+    <div id="unconfiguredList" class="tab-list"></div>
   </div>
 </div>
 

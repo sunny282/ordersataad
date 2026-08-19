@@ -422,6 +422,28 @@ textarea { resize: vertical; }
 .pill.approved { background: rgba(52, 211, 153, 0.15); color: var(--ok); }
 .pill.rejected { background: rgba(248, 113, 113, 0.15); color: var(--danger); }
 .pill.inactive { background: rgba(148, 163, 184, 0.15); color: var(--muted); }
+.pill.auto-approved { background: rgba(56, 189, 248, 0.15); color: #38bdf8; }
+
+/* ===== Technician 3-choice status picker ===== */
+.status-choices { display: flex; flex-wrap: wrap; gap: 8px; }
+.status-choice-btn {
+  flex: 1 1 auto;
+  min-width: 120px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--bg-elev);
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.status-choice-btn.active { background: var(--accent); color: #04212b; border-color: var(--accent); }
+.status-choice-btn.problematic.active { background: var(--danger); border-color: var(--danger); color: #fff; }
+
+/* ===== Manage Statuses drawer: sequence reorder controls ===== */
+.seq-reorder-btns { display: flex; gap: 4px; flex: 0 0 auto; }
+.seq-reorder-btns .icon-btn { width: 28px; height: 28px; font-size: 13px; }
 
 /* ===== Appearance drawer (theme color pickers) ===== */
 .theme-row {
@@ -461,8 +483,6 @@ textarea { resize: vertical; }
 .install-banner .btn.small { padding: 6px 12px; font-size: 12px; }
 
 /* v2.1 admin/technician workflow additions */
-.wide-drawer { max-width: 900px; }
-.dashboard-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(240px,1fr)); gap:12px; margin-top:14px; }
 .dashboard-card { border:1px solid var(--border,#ddd); border-radius:12px; padding:14px; background:var(--panel,#fff); color:#000; }
 .dashboard-card h3 { margin:0 0 10px; color:#000; }
 .dashboard-card > strong { font-size:32px; color:#000; }
@@ -470,8 +490,73 @@ textarea { resize: vertical; }
 .dash-team { margin-bottom:16px; color:#000; }
 .readonly-value { padding:11px 12px; border:1px solid var(--border,#ddd); border-radius:8px; background:var(--muted-bg,#f6f6f6); min-height:20px; white-space:pre-wrap; word-break:break-word; color:#000; }
 .tech-edit-fields { margin-top:8px; }
-.pending-desc, .pending-status { width:100%; box-sizing:border-box; }
-@media (max-width:600px) {
-  .wide-drawer { max-width:none; width:100%; }
-  .dashboard-grid { grid-template-columns:1fr; }
+
+/* ===== Team checkbox picker (Manage Coordinators) ===== */
+.checkbox-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-elev);
 }
+.checkbox-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+}
+.checkbox-row input { margin: 0; }
+.pending-desc, .pending-status { width:100%; box-sizing:border-box; }
+
+/* ===== Home layout: persistent dashboard panel + search/order area =====
+ * Stacked (dashboard on top) on narrow/phone screens — matches how this
+ * app is mostly used. On wider screens the dashboard becomes a sticky
+ * left column instead, alongside search/order card on the right.
+ */
+.home-layout {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.dashboard-panel { display: flex; flex-direction: column; }
+.dashboard-panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+.dashboard-panel-head .picker-title { margin: 0; }
+.home-main { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+
+@media (min-width: 900px) {
+  .home-layout { flex-direction: row; align-items: flex-start; }
+  .dashboard-panel { flex: 0 0 340px; position: sticky; top: 12px; max-height: calc(100vh - 24px); overflow-y: auto; }
+  .home-main { flex: 1; min-width: 0; }
+}
+
+/* Clickable status rows in the dashboard panel that expand into an order list */
+.dash-row-clickable {
+  width: 100%;
+  border: none;
+  background: none;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+.dash-status-group { border-bottom: 1px solid var(--border, #eee); }
+.dash-status-group:last-child { border-bottom: none; }
+.dash-orders-list { padding: 4px 0 10px; }
+.dash-order-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 6px 4px;
+  font-size: 13px;
+  color: #000;
+}
+.dash-order-id { font-weight: 600; }
+.dash-order-team { color: var(--muted); flex: 1; text-align: right; margin-right: 8px; }
+.dash-order-row .copy-order-btn { flex: 0 0 auto; padding: 4px 10px; font-size: 12px; }

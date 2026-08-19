@@ -1,9 +1,17 @@
-const { verifyAdmin, readTab, colToIndex, getSheetConfig, json } = require('./_lib');
+const { verifyRequester, readTab, colToIndex, getSheetConfig, json } = require('./_lib');
 
+// Reachable by admins (every team) and coordinators (only their assigned
+// teams — both the flat order list and every aggregate below only ever
+// include rows from teams they're scoped to).
 exports.handler = async (event) => {
-  const isAdmin = await verifyAdmin(event);
-  if (!isAdmin) return json(401, { error: 'Admin sign-in required' });
+  const requester = await verifyRequester(event);
+  if (!requester) return json(401, { error: 'Sign-in required' });
   if (event.httpMethod !== 'GET') return json(405, { error: 'Method not allowed' });
+
+  const myTeams = requester.role === 'coordinator'
+    ? requester.teams.map((t) => t.trim().toLowerCase())
+    : null;
+
   try {
     const cfg = getSheetConfig();
     const rows = await readTab(cfg.progressTab);
@@ -19,6 +27,7 @@ exports.handler = async (event) => {
       if (!orderId) return;
       const status = (row[statusIdx] || '').toString().trim() || 'No Status';
       const team = (row[teamIdx] || '').toString().trim() || 'No Team';
+      if (myTeams && !myTeams.includes(team.toLowerCase())) return;
       orders.push({ rowNum: i + 1, orderId, status, team, name: row[3] || '' });
       byStatus[status] = (byStatus[status] || 0) + 1;
       byTeam[team] = (byTeam[team] || 0) + 1;

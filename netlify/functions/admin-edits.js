@@ -1,27 +1,40 @@
 const {
-  verifyAdmin, readTab, updateCell, getSheetConfig, colToIndex,
+  verifyRequester, readTab, updateCell, getSheetConfig,
   PENDING_TAB, json
 } = require('./_lib');
 
 // PendingEdits tab columns:
 // A edit_id | B order_id | C tab_name | D row_num | E technician | F old_desc
-// G new_desc | H submitted_at | I status | J resolved_by | K resolved_at | L admin_note
+// G new_desc | H submitted_at | I status | J resolved_by | K resolved_at
+// L admin_note | M old_status | N new_status | O team
+//
+// Reachable by admins (unrestricted) and coordinators (scoped to their
+// assigned teams — an edit whose team isn't theirs is invisible to them
+// and can't be approved/rejected/edited by them, even if they know the
+// editId).
 
 exports.handler = async (event) => {
-  const isAdmin = await verifyAdmin(event);
-  if (!isAdmin) return json(401, { error: 'Admin sign-in required' });
+  const requester = await verifyRequester(event);
+  if (!requester) return json(401, { error: 'Sign-in required' });
+
+  const myTeams = requester.role === 'coordinator'
+    ? requester.teams.map((t) => t.trim().toLowerCase())
+    : null;
 
   try {
     if (event.httpMethod === 'GET') {
       const rows = await readTab(PENDING_TAB);
-      const edits = rows.map((r, i) => ({
+      let edits = rows.map((r, i) => ({
         sheetRow: i + 1,
         editId: r[0], orderId: r[1], tabName: r[2], rowNum: parseInt(r[3], 10),
         technician: r[4], oldDesc: r[5], newDesc: r[6], submittedAt: r[7],
         status: r[8], resolvedBy: r[9] || '', resolvedAt: r[10] || '', adminNote: r[11] || '',
-        oldStatus: r[12] || '', newStatus: r[13] || ''
-      })).reverse();
-      return json(200, { edits });
+        oldStatus: r[12] || '', newStatus: r[13] || '', team: r[14] || ''
+      }));
+      if (myTeams) {
+        edits = edits.filter((e) => myTeams.includes((e.team || '').trim().toLowerCase()));
+      }
+      return json(200, { edits: edits.reverse() });
     }
 
     if (event.httpMethod === 'POST') {
@@ -29,7 +42,6 @@ exports.handler = async (event) => {
       const editId = body.editId;
       const decision = body.decision; // 'approved' | 'rejected'
       const adminNote = (body.adminNote || '').trim();
-      const adminName = (body.adminName || '').trim();
       if (!editId || !['approved', 'rejected'].includes(decision)) {
         return json(400, { error: 'Missing or invalid editId/decision' });
       }
@@ -40,6 +52,9 @@ exports.handler = async (event) => {
       const row = rows[idx];
       const sheetRow = idx + 1;
 
+      if (myTeams && !myTeams.includes((row[14] || '').trim().toLowerCase())) {
+        return json(403, { error: "You don't have access to this team's edits" });
+      }
       if ((row[8] || '').trim() !== 'pending') {
         return json(409, { error: `This edit was already ${row[8]}` });
       }
@@ -54,9 +69,16 @@ exports.handler = async (event) => {
         if (newStatus) await updateCell(tabName, `${cfg.colStatus}${rowNum}`, newStatus);
       }
 
+      // Resolver identity: admins are trusted to say who they are (their
+      // Google email, sent from the client); coordinators are recorded
+      // from their verified session, not whatever the client claims.
+      const resolvedBy = requester.role === 'coordinator'
+        ? (requester.fullName || requester.username)
+        : ((body.adminName || '').trim() || 'Admin');
+
       const resolvedAt = new Date().toISOString();
       await updateCell(PENDING_TAB, `I${sheetRow}`, decision);
-      await updateCell(PENDING_TAB, `J${sheetRow}`, adminName);
+      await updateCell(PENDING_TAB, `J${sheetRow}`, resolvedBy);
       await updateCell(PENDING_TAB, `K${sheetRow}`, resolvedAt);
       if (adminNote) await updateCell(PENDING_TAB, `L${sheetRow}`, adminNote);
 
@@ -75,7 +97,11 @@ exports.handler = async (event) => {
       const rows = await readTab(PENDING_TAB);
       const idx = rows.findIndex((r) => r[0] === editId);
       if (idx === -1) return json(404, { error: 'Edit not found' });
-      if ((rows[idx][8] || '').trim() !== 'pending') return json(409, { error: 'Only pending edits can be changed' });
+      const row = rows[idx];
+      if (myTeams && !myTeams.includes((row[14] || '').trim().toLowerCase())) {
+        return json(403, { error: "You don't have access to this team's edits" });
+      }
+      if ((row[8] || '').trim() !== 'pending') return json(409, { error: 'Only pending edits can be changed' });
       const sheetRow = idx + 1;
       await updateCell(PENDING_TAB, `G${sheetRow}`, newDesc);
       await updateCell(PENDING_TAB, `N${sheetRow}`, newStatus);

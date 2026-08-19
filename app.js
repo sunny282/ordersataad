@@ -125,25 +125,52 @@ function configComplete() {
 function refreshView() {
   const techApp = el('techApp');
   const techSignedIn = el('techSignedIn');
+  const coordSignedIn = el('coordSignedIn');
   const adminToolsBtns = el('adminToolsBtns');
+  const adminOnlyEls = document.querySelectorAll('.admin-only');
+  const homeLayout = el('homeLayout');
+  const dashboardPanel = el('dashboardPanel');
 
   // Technician session takes priority — separate world from the admin flow.
   if (techToken) {
     signInGate.classList.add('hidden');
     signedOut.classList.add('hidden');
     signedIn.classList.add('hidden');
+    coordSignedIn.classList.add('hidden');
     techSignedIn.classList.remove('hidden');
     el('techWhoAmI').textContent = techSession.fullName || techSession.username;
     settingsBtn.classList.add('hidden');
     adminToolsBtns.classList.add('hidden');
-    searchSection.classList.add('hidden');
-    tabPicker.classList.add('hidden');
-    orderCard.classList.add('hidden');
+    homeLayout.classList.add('hidden');
+    dashboardPanel.classList.add('hidden');
     techApp.classList.remove('hidden');
     return;
   }
   techSignedIn.classList.add('hidden');
   techApp.classList.add('hidden');
+
+  // Coordinator session — reuses the same search/order-card UI as admin
+  // (scoped server-side to their teams), but without the admin-only
+  // management tools (Settings, Technicians, Coordinators, Teams, Permissions).
+  if (coordToken) {
+    signInGate.classList.add('hidden');
+    signedOut.classList.add('hidden');
+    signedIn.classList.add('hidden');
+    coordSignedIn.classList.remove('hidden');
+    el('coordWhoAmI').textContent = (coordSession.fullName || coordSession.username) + ' · ' + (coordSession.teams || []).join(', ');
+    settingsBtn.classList.add('hidden');
+    adminToolsBtns.classList.remove('hidden');
+    adminOnlyEls.forEach((e) => e.classList.add('hidden'));
+    homeLayout.classList.remove('hidden');
+    dashboardPanel.classList.remove('hidden');
+    searchSection.classList.remove('hidden');
+    tabPicker.classList.add('hidden');
+    orderCard.classList.add('hidden');
+    refreshPendingBadge();
+    loadDashboardPanel();
+    return;
+  }
+  coordSignedIn.classList.add('hidden');
   settingsBtn.classList.add('hidden');
 
   const hasConfig = configComplete();
@@ -152,7 +179,8 @@ function refreshView() {
 
   if (!hasConfig) {
     signInGate.classList.toggle('hidden', !!accessToken);
-    searchSection.classList.add('hidden');
+    homeLayout.classList.add('hidden');
+    dashboardPanel.classList.add('hidden');
     tabPicker.classList.add('hidden');
     orderCard.classList.add('hidden');
     adminToolsBtns.classList.add('hidden');
@@ -163,15 +191,20 @@ function refreshView() {
     signedOut.classList.add('hidden');
     signedIn.classList.remove('hidden');
     signInGate.classList.add('hidden');
+    homeLayout.classList.remove('hidden');
+    dashboardPanel.classList.remove('hidden');
     searchSection.classList.remove('hidden');
     adminToolsBtns.classList.remove('hidden');
+    adminOnlyEls.forEach((e) => e.classList.remove('hidden'));
     settingsBtn.classList.remove('hidden');
     refreshPendingBadge();
+    loadDashboardPanel();
   } else {
     signedOut.classList.remove('hidden');
     signedIn.classList.add('hidden');
     signInGate.classList.remove('hidden');
-    searchSection.classList.add('hidden');
+    homeLayout.classList.add('hidden');
+    dashboardPanel.classList.add('hidden');
     tabPicker.classList.add('hidden');
     orderCard.classList.add('hidden');
     adminToolsBtns.classList.add('hidden');
@@ -252,10 +285,36 @@ async function getAllTabNames() {
   return (data.sheets || []).map((s) => s.properties.title);
 }
 
-// Populates the admin status dropdown with the standard status list plus
+// Admin/coordinator status dropdown stays free-pick, unrestricted — the
+// forward-only sequence + permissions only ever constrain technicians.
+// Base list = the technician sequence (once loaded) + Problematic + a
+// handful of legacy statuses that predate the sequence, so they're still
+// directly selectable here. Falls back to a sane default before the real
+// sequence has loaded from the server.
+const LEGACY_EXTRA_STATUSES = ['Postponed', 'RL Notified', 'Tomorrow', 'Cancelled'];
+let adminBaseStatusList = ['SubContractor Assigned', 'Installation Scheduled', 'Work In Progress', 'Installation Tested and Completed', 'Completed', 'Problematic', ...LEGACY_EXTRA_STATUSES];
+
+// Sheet-discovered extras are tracked separately from the base list so the
+// two async loaders (base list from admin-permissions, extras from the
+// sheet/coordinator search) never clobber each other regardless of which
+// resolves first.
+let sheetDiscoveredStatuses = [];
+
+async function refreshAdminBaseStatusList() {
+  try {
+    const data = await adminApiCall('/admin-permissions');
+    const names = (data.statuses || []).map((s) => s.name);
+    adminBaseStatusList = [...new Set([...names, ...LEGACY_EXTRA_STATUSES])];
+    recomputeAdminKnownStatuses();
+  } catch (e) { /* keep the fallback list */ }
+}
+
+// Populates the admin status dropdown with the sequence/legacy list plus
 // any other distinct, non-empty values already used in the writable tab's
 // Status column — so older/custom statuses already in the sheet still show
-// up even if they're not in the standard list.
+// up even if they're not configured. This is purely a convenience for the
+// admin/coordinator's own unrestricted picker; it never affects what a
+// technician can select.
 let adminKnownStatuses = [];
 async function loadKnownStatuses() {
   if (!accessToken || !config.sheetId || !config.progressTab) return;
@@ -264,15 +323,28 @@ async function loadKnownStatuses() {
     const url = `${SHEETS_BASE}/${config.sheetId}/values/${range}`;
     const data = await apiGet(url);
     const values = (data.values || []).map((r) => (r[0] || '').toString().trim()).filter(Boolean);
-    const extra = [...new Set(values)].filter((s) => !STATUS_LIST.includes(s)).sort((a, b) => a.localeCompare(b));
-    adminKnownStatuses = [...STATUS_LIST, ...extra];
-    populateStatusSelect(el('statusSelect').value);
-  } catch (e) { /* ignore — dropdown just falls back to the standard list */ }
+    mergeKnownStatuses(values);
+  } catch (e) { /* ignore — dropdown just falls back to the base list */ }
+}
+
+// Shared by loadKnownStatuses (admin, reads the sheet directly) and
+// coordinator searches (which get a deduped status list back from
+// coordinator-orders.js, since coordinators have no Sheets API token of
+// their own to read the column directly).
+function mergeKnownStatuses(values) {
+  sheetDiscoveredStatuses = [...new Set(values)];
+  recomputeAdminKnownStatuses();
+}
+
+function recomputeAdminKnownStatuses() {
+  const extra = sheetDiscoveredStatuses.filter((s) => !adminBaseStatusList.includes(s)).sort((a, b) => a.localeCompare(b));
+  adminKnownStatuses = [...adminBaseStatusList, ...extra];
+  populateStatusSelect(el('statusSelect').value);
 }
 
 function populateStatusSelect(current) {
   const select = el('statusSelect');
-  const options = adminKnownStatuses.length ? adminKnownStatuses : STATUS_LIST;
+  const options = adminKnownStatuses.length ? adminKnownStatuses : adminBaseStatusList;
   const full = current && !options.includes(current) ? [...options, current] : options;
   select.innerHTML = full.map((s) => `<option value="${escapeHtml(s)}">${escapeHtml(s)}</option>`).join('');
   if (current) select.value = current;
@@ -285,11 +357,13 @@ async function batchGetAllTabs(tabNames) {
   return data.valueRanges || [];
 }
 
-/* ===== Search across every tab ===== */
+/* ===== Search across every tab (admin) / coordinator's teams ===== */
 el('searchForm').addEventListener('submit', async (e) => {
   e.preventDefault();
   const q = el('orderIdInput').value.trim();
   if (!q) return;
+  if (coordToken) return coordSearchSubmit(q);
+
   const statusLine = el('searchStatus');
   statusLine.textContent = 'Searching all tabs…';
   statusLine.className = 'status-line loading';
@@ -327,6 +401,7 @@ el('searchForm').addEventListener('submit', async (e) => {
     if (matches.length === 1) {
       loadMatch(matches[0]);
     } else {
+      el('tabPicker').querySelector('.picker-title').textContent = 'Found in multiple tabs — pick one';
       showTabPicker(matches);
     }
   } catch (err) {
@@ -336,11 +411,47 @@ el('searchForm').addEventListener('submit', async (e) => {
   }
 });
 
+// Coordinator search — scoped server-side to their team(s), always within
+// the single writable tab (no cross-tab picker needed, but multiple rows
+// can still match the same substring within that tab).
+async function coordSearchSubmit(q) {
+  const statusLine = el('searchStatus');
+  statusLine.textContent = 'Searching…';
+  statusLine.className = 'status-line loading';
+  tabPicker.classList.add('hidden');
+  orderCard.classList.add('hidden');
+
+  try {
+    const data = await authedApiCall('/coordinator-orders?q=' + encodeURIComponent(q));
+    const matches = data.matches || [];
+    mergeKnownStatuses(data.statuses || []);
+
+    if (!matches.length) {
+      statusLine.textContent = 'No matching order found for your teams.';
+      statusLine.className = 'status-line err';
+      return;
+    }
+    statusLine.textContent = '';
+    statusLine.className = 'status-line';
+
+    lastMatches = matches.map((m) => ({ tabName: data.tab, rowNum: m.rowNum, row: m.row }));
+    if (lastMatches.length === 1) {
+      loadMatch(lastMatches[0]);
+    } else {
+      el('tabPicker').querySelector('.picker-title').textContent = 'Multiple matches — pick one';
+      showTabPicker(lastMatches);
+    }
+  } catch (err) {
+    statusLine.textContent = err.message;
+    statusLine.className = 'status-line err';
+  }
+}
+
 function showTabPicker(matches) {
   const list = el('tabPickerList');
   list.innerHTML = '';
   matches.forEach((m) => {
-    const isWritable = m.tabName === config.progressTab;
+    const isWritable = coordToken ? true : (m.tabName === config.progressTab);
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.className = 'tab-option';
@@ -371,7 +482,7 @@ function cellAt(row, letter) {
 function populateOrderCard(rowNum, row) {
   currentRow = rowNum;
 
-  const writable = currentTab === config.progressTab;
+  const writable = coordToken ? true : (currentTab === config.progressTab);
   const readOnlyNotice = el('readOnlyNotice');
   readOnlyNotice.classList.toggle('hidden', writable);
   el('readOnlyTabName').textContent = currentTab;
@@ -404,7 +515,9 @@ function populateOrderCard(rowNum, row) {
 /* ===== Save update ===== */
 el('updateForm').addEventListener('submit', async (e) => {
   e.preventDefault();
-  if (!currentRow || currentTab !== config.progressTab) return;
+  if (!currentRow) return;
+  if (coordToken) return coordSaveSubmit();
+  if (currentTab !== config.progressTab) return;
   const saveBtn = el('saveBtn');
   const saveStatus = el('saveStatus');
   saveBtn.disabled = true;
@@ -433,6 +546,36 @@ el('updateForm').addEventListener('submit', async (e) => {
     saveBtn.disabled = false;
   }
 });
+
+// Coordinator save — writes straight to the sheet via the service account
+// (coordinator-save.js), scoped server-side to their teams. No approval
+// step, unlike a technician's submission.
+async function coordSaveSubmit() {
+  const saveBtn = el('saveBtn');
+  const saveStatus = el('saveStatus');
+  saveBtn.disabled = true;
+  saveStatus.textContent = 'Saving…';
+  saveStatus.className = 'status-line loading';
+
+  const status = el('statusSelect').value.trim();
+  const desc = el('descInput').value;
+
+  try {
+    await authedApiCall('/coordinator-save', {
+      method: 'POST',
+      body: JSON.stringify({ rowNum: currentRow, newStatus: status, newDesc: desc })
+    });
+    saveStatus.textContent = 'Saved ✓';
+    saveStatus.className = 'status-line ok';
+    el('statusPillPreview').textContent = status;
+    toast('Order updated');
+  } catch (err) {
+    saveStatus.textContent = err.message;
+    saveStatus.className = 'status-line err';
+  } finally {
+    saveBtn.disabled = false;
+  }
+}
 
 el('cancelBtn').addEventListener('click', () => {
   orderCard.classList.add('hidden');
@@ -505,6 +648,42 @@ let techCurrentOrderId = null;
   } catch (e) { /* ignore */ }
 })();
 
+/* ---- Coordinator session (username/password, JWT) ----
+ * Same pattern as the technician session, but a coordinator can have more
+ * than one team, and their edits/searches are scoped to all of them.
+ */
+const COORD_KEY = 'orderUpdateCoordSession';
+let coordToken = null;
+let coordSession = null; // { username, teams: [...], fullName }
+
+(function loadCoordSession() {
+  try {
+    const stored = JSON.parse(localStorage.getItem(COORD_KEY));
+    if (stored && stored.token) {
+      coordToken = stored.token;
+      coordSession = { username: stored.username, teams: stored.teams || [], fullName: stored.fullName };
+    }
+  } catch (e) { /* ignore */ }
+})();
+
+// Used for anything either an admin (Google token) or a coordinator (JWT)
+// can call — Pending Edits, Orders Dashboard. Picks whichever session is
+// active; harmless to call when only one is ever set at a time.
+async function authedApiCall(path, opts = {}) {
+  const token = accessToken || coordToken;
+  const res = await fetch(FN_BASE + path, {
+    ...opts,
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: 'Bearer ' + token,
+      ...(opts.headers || {})
+    }
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || 'Request failed');
+  return data;
+}
+
 async function techApiCall(path, opts = {}) {
   const res = await fetch(FN_BASE + path, {
     ...opts,
@@ -526,14 +705,26 @@ async function techApiCall(path, opts = {}) {
 el('roleTabAdmin').addEventListener('click', () => {
   el('roleTabAdmin').classList.add('active');
   el('roleTabTech').classList.remove('active');
+  el('roleTabCoord').classList.remove('active');
   el('adminSignInPanel').classList.remove('hidden');
   el('techLoginForm').classList.add('hidden');
+  el('coordLoginForm').classList.add('hidden');
 });
 el('roleTabTech').addEventListener('click', () => {
   el('roleTabTech').classList.add('active');
   el('roleTabAdmin').classList.remove('active');
+  el('roleTabCoord').classList.remove('active');
   el('techLoginForm').classList.remove('hidden');
   el('adminSignInPanel').classList.add('hidden');
+  el('coordLoginForm').classList.add('hidden');
+});
+el('roleTabCoord').addEventListener('click', () => {
+  el('roleTabCoord').classList.add('active');
+  el('roleTabAdmin').classList.remove('active');
+  el('roleTabTech').classList.remove('active');
+  el('coordLoginForm').classList.remove('hidden');
+  el('adminSignInPanel').classList.add('hidden');
+  el('techLoginForm').classList.add('hidden');
 });
 
 /* ---- Technician login/logout ---- */
@@ -577,15 +768,58 @@ function techSignOut() {
 }
 el('techSignOutBtn').addEventListener('click', techSignOut);
 
+/* ---- Coordinator login/logout ---- */
+el('coordLoginForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const username = el('coordUsername').value.trim();
+  const password = el('coordPassword').value;
+  const status = el('coordLoginStatus');
+  if (!username || !password) return;
+  status.textContent = 'Signing in…';
+  status.className = 'status-line loading';
+  try {
+    const res = await fetch(FN_BASE + '/coordinator-login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password })
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || 'Sign-in failed');
+    coordToken = data.token;
+    coordSession = { username: data.username, teams: data.teams || [], fullName: data.fullName };
+    localStorage.setItem(COORD_KEY, JSON.stringify({ token: coordToken, ...coordSession }));
+    status.textContent = '';
+    status.className = 'status-line';
+    el('coordPassword').value = '';
+    refreshView();
+  } catch (err) {
+    status.textContent = err.message;
+    status.className = 'status-line err';
+  }
+});
+
+function coordSignOut() {
+  coordToken = null;
+  coordSession = null;
+  currentRow = null;
+  currentTab = null;
+  localStorage.removeItem(COORD_KEY);
+  orderCard.classList.add('hidden');
+  tabPicker.classList.add('hidden');
+  refreshView();
+}
+el('coordSignOutBtn').addEventListener('click', coordSignOut);
+
 /* ---- My Orders by status ---- */
-// Fixed display order for the known statuses (matches the admin status
-// dropdown); anything else found in the sheet is grouped as "Other".
-const STATUS_LIST = ['Installation Scheduled', 'Problematic', 'Postponed', 'RL Notified', 'SubContractor Assigned', 'Tomorrow', 'Completed', 'Cancelled'];
+// Tab display order now follows the admin-configured sequence (see
+// StatusPermissions / /tech-orders response), not a hardcoded list —
+// anything outside the sequence (legacy/unconfigured statuses) is still
+// shown as its own tab, just appended after the sequence ones.
 
 let techAllOrders = [];   // every order on the tech's team, from the last load
 let techOrdersCols = null;
-let techKnownStatuses = [];
-let techActiveStatusTab = 'Installation Scheduled';
+let techStatusConfig = { list: [], sequence: [] };
+let techActiveStatusTab = null;
 
 function techOrderStatus(order) {
   const s = (order.row[colToIndex(techOrdersCols.colStatus)] || '').toString().trim();
@@ -601,8 +835,12 @@ async function loadTechOrdersByStatus() {
     const data = await techApiCall('/tech-orders');
     techAllOrders = data.matches || [];
     techOrdersCols = data.cols;
-    techKnownStatuses = data.statuses || [];
-    techActiveStatusTab = techAllOrders.some((o) => techOrderStatus(o) === 'Installation Scheduled') ? 'Installation Scheduled' : 'All';
+    techStatusConfig = data.statusConfig || { list: [], sequence: [] };
+    // Default tab: first status in the sequence that actually has orders,
+    // else "All".
+    techActiveStatusTab = techStatusConfig.sequence.find((s) =>
+      techAllOrders.some((o) => techOrderStatus(o) === s)
+    ) || 'All';
     renderTechStatusTabs();
     renderTechStatusOrdersList();
   } catch (err) {
@@ -625,8 +863,8 @@ function renderTechStatusTabs() {
     const s = techOrderStatus(o);
     counts[s] = (counts[s] || 0) + 1;
   });
-  const knownPresent = STATUS_LIST.filter((s) => counts[s]);
-  const otherPresent = Object.keys(counts).filter((s) => !STATUS_LIST.includes(s));
+  const knownPresent = techStatusConfig.sequence.filter((s) => counts[s]);
+  const otherPresent = Object.keys(counts).filter((s) => !techStatusConfig.sequence.includes(s));
   const tabs = ['All', ...knownPresent, ...otherPresent];
 
   tabs.forEach((s) => {
@@ -695,6 +933,7 @@ el('techSearchForm').addEventListener('submit', async (e) => {
   try {
     const data = await techApiCall('/tech-orders?q=' + encodeURIComponent(q));
     const matches = data.matches || [];
+    techStatusConfig = data.statusConfig || techStatusConfig;
     if (matches.length === 0) {
       status.textContent = 'No matching order found for your team.';
       status.className = 'status-line err';
@@ -725,15 +964,55 @@ el('techSearchForm').addEventListener('submit', async (e) => {
   }
 });
 
-function populateTechStatusOptions(current) {
-  const select = el('techCurrentStatus');
-  const options = [...new Set([
-    'Installation Scheduled', 'Problematic', 'Postponed', 'RL Notified',
-    'SubContractor Assigned', 'Tomorrow', 'Completed', 'Cancelled', current
-  ].filter(Boolean))];
-  const allOptions = [...new Set([...techKnownStatuses, ...options])];
-  select.innerHTML = allOptions.map((s) => `<option value="${escapeHtml(s)}">${escapeHtml(s)}</option>`).join('');
-  select.value = current;
+// Client-side twin of the server's computeTechStatusOptions (_lib.js) —
+// purely for rendering the 3 choices; the server re-validates every
+// submission independently, so this never needs to be trusted.
+function computeTechStatusOptionsClient(currentStatus) {
+  const cfgFor = (name) => techStatusConfig.list.find((s) => s.name.toLowerCase() === (name || '').trim().toLowerCase());
+  const currentCfg = cfgFor(currentStatus);
+  if (currentCfg && currentCfg.viewOnly) return { viewOnly: true, options: [] };
+  const options = [{ value: currentStatus || '', label: 'Keep Current Status', kind: 'keep' }];
+  const seq = techStatusConfig.sequence;
+  const idx = seq.findIndex((s) => s.toLowerCase() === (currentStatus || '').trim().toLowerCase());
+  if (idx !== -1 && idx < seq.length - 1) {
+    options.push({ value: seq[idx + 1], label: seq[idx + 1], kind: 'next' });
+  }
+  if ((currentStatus || '').trim().toLowerCase() !== 'problematic') {
+    options.push({ value: 'Problematic', label: 'Problematic', kind: 'problematic' });
+  }
+  return { viewOnly: false, options };
+}
+
+let techSelectedStatus = null;
+
+function renderTechStatusChoices(currentStatus) {
+  const wrap = el('techStatusChoices');
+  const notice = el('techViewOnlyNotice');
+  const form = el('techEditForm');
+  const { viewOnly, options } = computeTechStatusOptionsClient(currentStatus);
+  if (viewOnly) {
+    wrap.innerHTML = '';
+    notice.classList.remove('hidden');
+    form.classList.add('hidden');
+    techSelectedStatus = null;
+    return;
+  }
+  notice.classList.add('hidden');
+  form.classList.remove('hidden');
+  techSelectedStatus = options[0] ? options[0].value : null;
+  wrap.innerHTML = '';
+  options.forEach((opt, i) => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'status-choice-btn ' + opt.kind + (i === 0 ? ' active' : '');
+    btn.textContent = opt.label;
+    btn.addEventListener('click', () => {
+      techSelectedStatus = opt.value;
+      wrap.querySelectorAll('.status-choice-btn').forEach((b) => b.classList.remove('active'));
+      btn.classList.add('active');
+    });
+    wrap.appendChild(btn);
+  });
 }
 
 function populateTechOrderCard(rowNum, row, cols, hasPending = false) {
@@ -748,7 +1027,7 @@ function populateTechOrderCard(rowNum, row, cols, hasPending = false) {
   el('techMetaType').textContent = c('J');
   el('techMetaDate').textContent = c('G');
   el('techStatusPill').textContent = c(cols.colStatus);
-  populateTechStatusOptions(c(cols.colStatus) === '—' ? '' : c(cols.colStatus));
+  renderTechStatusChoices(c(cols.colStatus) === '—' ? '' : c(cols.colStatus));
   el('techLastUpdate').textContent = row[colToIndex(cols.colDesc)] || 'No previous update';
   el('techDescInput').value = '';
   el('techSubmitBtn').disabled = hasPending;
@@ -783,18 +1062,20 @@ el('techEditForm').addEventListener('submit', async (e) => {
   status.className = 'status-line loading';
   try {
     const updateText = el('techDescInput').value.trim();
-    const newStatus = el('techCurrentStatus').value.trim();
+    const newStatus = (techSelectedStatus || '').trim();
     if (!/^[A-Za-z0-9]+(?: [A-Za-z0-9]+)*$/.test(updateText)) {
-      throw new Error('Update may contain only letters, numbers, and single spaces');
+      throw new Error('A comment is required — letters, numbers, and single spaces only');
     }
-    if (!newStatus) throw new Error('Please select a status');
-    await techApiCall('/tech-submit-edit', {
+    if (!newStatus) throw new Error('Please choose an option');
+    const res = await techApiCall('/tech-submit-edit', {
       method: 'POST',
       body: JSON.stringify({ rowNum: techCurrentRowNum, newDesc: updateText, newStatus })
     });
-    status.textContent = 'Submitted — waiting for admin approval ✓';
+    status.textContent = res.status === 'auto-approved'
+      ? 'Submitted — applied automatically ✓'
+      : 'Submitted — waiting for admin approval ✓';
     status.className = 'status-line ok';
-    toast('Submitted for approval');
+    toast(res.status === 'auto-approved' ? 'Applied' : 'Submitted for approval');
     loadMyEdits();
     btn.disabled = true;
   } catch (err) {
@@ -838,27 +1119,20 @@ function escapeHtml(s) {
 }
 
 /* =========================================================
- * ADMIN TOOLS — Technicians + Pending Edits, layered on top of
- * the existing Google sign-in. Uses the admin's own OAuth token
- * as proof of admin identity (same trust model as the rest of
- * the app: anyone with edit access to the sheet is an admin).
- * ========================================================= */
+ * ADMIN TOOLS — Technicians, Coordinators, Teams, Pending Edits, layered
+ * on top of the existing Google sign-in. Uses the admin's own OAuth token
+ * as proof of admin identity (same trust model as the rest of the app:
+ * anyone with edit access to the sheet is an admin). Pending Edits and
+ * Orders Dashboard are also reachable by coordinators via authedApiCall
+ * (defined above, near the coordinator session) — everything else here
+ * uses adminApiCall directly since those tools are admin-only.
+ */
 async function adminApiCall(path, opts = {}) {
-  const res = await fetch(FN_BASE + path, {
-    ...opts,
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: 'Bearer ' + accessToken,
-      ...(opts.headers || {})
-    }
-  });
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.error || 'Request failed');
-  return data;
+  return authedApiCall(path, opts);
 }
 
 async function refreshPendingBadge() {
-  if (!accessToken) return;
+  if (!accessToken && !coordToken) return;
   try {
     const data = await adminApiCall('/admin-edits');
     const pendingCount = (data.edits || []).filter((ed) => ed.status === 'pending').length;
@@ -868,11 +1142,37 @@ async function refreshPendingBadge() {
   } catch (e) { /* ignore — badge is a nicety, not critical */ }
 }
 
+/* ---- Shared: known teams (admin-managed list) ---- */
+let cachedTeams = null;
+async function fetchTeams(force = false) {
+  if (cachedTeams && !force) return cachedTeams;
+  const data = await adminApiCall('/admin-teams');
+  cachedTeams = data.teams || [];
+  return cachedTeams;
+}
+function teamSelectOptions(teams, current) {
+  if (!teams.length) return '<option value="">No teams yet — add one in Manage Teams</option>';
+  return teams.map((t) => `<option value="${escapeHtml(t)}" ${t === current ? 'selected' : ''}>${escapeHtml(t)}</option>`).join('');
+}
+function teamCheckboxList(teams, selected = []) {
+  if (!teams.length) return '<p class="muted">No teams yet — add one in Manage Teams first.</p>';
+  return teams.map((t) => `
+    <label class="checkbox-row"><input type="checkbox" value="${escapeHtml(t)}" ${selected.includes(t) ? 'checked' : ''}> ${escapeHtml(t)}</label>
+  `).join('');
+}
+function getCheckedTeams(containerEl) {
+  return [...containerEl.querySelectorAll('input[type=checkbox]:checked')].map((cb) => cb.value);
+}
+
 /* ---- Technicians drawer ---- */
 const techniciansOverlay = el('techniciansOverlay');
-el('techniciansBtn').addEventListener('click', () => {
+el('techniciansBtn').addEventListener('click', async () => {
   techniciansOverlay.classList.remove('hidden');
   loadTechniciansList();
+  try {
+    const teams = await fetchTeams(true);
+    el('newTechTeam').innerHTML = teamSelectOptions(teams);
+  } catch (e) { /* ignore — team dropdown just stays empty */ }
 });
 el('closeTechnicians').addEventListener('click', () => techniciansOverlay.classList.add('hidden'));
 techniciansOverlay.addEventListener('click', (e) => {
@@ -883,7 +1183,7 @@ async function loadTechniciansList() {
   const list = el('techniciansList');
   list.innerHTML = '<p class="muted">Loading…</p>';
   try {
-    const data = await adminApiCall('/admin-technicians');
+    const [data, teams] = await Promise.all([adminApiCall('/admin-technicians'), fetchTeams()]);
     list.innerHTML = '';
     if (!data.technicians.length) {
       list.innerHTML = '<p class="muted">No technicians yet.</p>';
@@ -903,7 +1203,7 @@ async function loadTechniciansList() {
           <div class="field"><label>Full name</label><input class="edit-tech-name" value="${escapeHtml(t.fullName)}"></div>
         </div>
         <div class="field-row tech-edit-fields">
-          <div class="field"><label>Team</label><input class="edit-tech-team" value="${escapeHtml(t.team)}"></div>
+          <div class="field"><label>Team</label><select class="edit-tech-team">${teamSelectOptions(teams, t.team)}</select></div>
           <div class="field"><label>New password</label><input class="edit-tech-password" type="password" placeholder="Leave blank to keep"></div>
         </div>
         <div class="list-row-actions">
@@ -966,6 +1266,178 @@ el('addTechForm').addEventListener('submit', async (e) => {
   }
 });
 
+/* ---- Coordinators drawer ---- */
+const coordinatorsOverlay = el('coordinatorsOverlay');
+el('coordinatorsBtn').addEventListener('click', async () => {
+  coordinatorsOverlay.classList.remove('hidden');
+  loadCoordinatorsList();
+  try {
+    const teams = await fetchTeams(true);
+    el('newCoordTeams').innerHTML = teamCheckboxList(teams);
+  } catch (e) {
+    el('newCoordTeams').innerHTML = '<p class="status-line err">Could not load teams.</p>';
+  }
+});
+el('closeCoordinators').addEventListener('click', () => coordinatorsOverlay.classList.add('hidden'));
+coordinatorsOverlay.addEventListener('click', (e) => {
+  if (e.target === coordinatorsOverlay) coordinatorsOverlay.classList.add('hidden');
+});
+
+async function loadCoordinatorsList() {
+  const list = el('coordinatorsList');
+  list.innerHTML = '<p class="muted">Loading…</p>';
+  try {
+    const [data, teams] = await Promise.all([adminApiCall('/admin-coordinators'), fetchTeams()]);
+    list.innerHTML = '';
+    if (!data.coordinators.length) {
+      list.innerHTML = '<p class="muted">No coordinators yet.</p>';
+      return;
+    }
+    data.coordinators.forEach((c) => {
+      const row = document.createElement('div');
+      row.className = 'list-row';
+      row.innerHTML = `
+        <div class="list-row-head">
+          <span class="list-row-title">${escapeHtml(c.fullName || c.username)}</span>
+          <span class="pill ${c.active ? 'approved' : 'inactive'}">${c.active ? 'active' : 'inactive'}</span>
+        </div>
+        <div class="list-row-sub">@${escapeHtml(c.username)} · Teams: ${escapeHtml(c.teams.join(', ') || '—')}</div>
+        <div class="field-row tech-edit-fields">
+          <div class="field"><label>Username</label><input class="edit-coord-username" value="${escapeHtml(c.username)}"></div>
+          <div class="field"><label>Full name</label><input class="edit-coord-name" value="${escapeHtml(c.fullName)}"></div>
+        </div>
+        <div class="field tech-edit-fields">
+          <label>Teams</label>
+          <div class="checkbox-list edit-coord-teams">${teamCheckboxList(teams, c.teams)}</div>
+        </div>
+        <div class="field tech-edit-fields">
+          <label>New password</label><input class="edit-coord-password" type="password" placeholder="Leave blank to keep">
+        </div>
+        <div class="list-row-actions">
+          <button type="button" class="btn primary save-coord-btn">Save changes</button>
+          <button type="button" class="btn ghost toggle-coord-active-btn">${c.active ? 'Deactivate' : 'Reactivate'}</button>
+        </div>
+      `;
+      row.querySelector('.save-coord-btn').addEventListener('click', async () => {
+        try {
+          await adminApiCall('/admin-coordinators', {
+            method: 'PATCH',
+            body: JSON.stringify({
+              rowNum: c.rowNum,
+              username: row.querySelector('.edit-coord-username').value,
+              fullName: row.querySelector('.edit-coord-name').value,
+              teams: getCheckedTeams(row.querySelector('.edit-coord-teams')),
+              password: row.querySelector('.edit-coord-password').value
+            })
+          });
+          toast('Coordinator updated');
+          loadCoordinatorsList();
+        } catch (err) { toast(err.message); }
+      });
+      row.querySelector('.toggle-coord-active-btn').addEventListener('click', async () => {
+        try {
+          await adminApiCall('/admin-coordinators', {
+            method: 'PATCH',
+            body: JSON.stringify({ rowNum: c.rowNum, active: !c.active })
+          });
+          loadCoordinatorsList();
+        } catch (err) { toast(err.message); }
+      });
+      list.appendChild(row);
+    });
+  } catch (err) {
+    list.innerHTML = `<p class="status-line err">${err.message}</p>`;
+  }
+}
+
+el('addCoordForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const status = el('addCoordStatus');
+  const payload = {
+    username: el('newCoordUsername').value.trim(),
+    password: el('newCoordPassword').value,
+    fullName: el('newCoordName').value.trim(),
+    teams: getCheckedTeams(el('newCoordTeams'))
+  };
+  status.textContent = 'Adding…';
+  status.className = 'status-line loading';
+  try {
+    await adminApiCall('/admin-coordinators', { method: 'POST', body: JSON.stringify(payload) });
+    status.textContent = 'Coordinator added ✓';
+    status.className = 'status-line ok';
+    el('addCoordForm').reset();
+    const teams = await fetchTeams(true);
+    el('newCoordTeams').innerHTML = teamCheckboxList(teams);
+    loadCoordinatorsList();
+  } catch (err) {
+    status.textContent = err.message;
+    status.className = 'status-line err';
+  }
+});
+
+/* ---- Teams drawer ---- */
+const teamsOverlay = el('teamsOverlay');
+el('teamsBtn').addEventListener('click', () => {
+  teamsOverlay.classList.remove('hidden');
+  loadTeamsList();
+});
+el('closeTeams').addEventListener('click', () => teamsOverlay.classList.add('hidden'));
+teamsOverlay.addEventListener('click', (e) => {
+  if (e.target === teamsOverlay) teamsOverlay.classList.add('hidden');
+});
+
+async function loadTeamsList() {
+  const list = el('teamsList');
+  list.innerHTML = '<p class="muted">Loading…</p>';
+  try {
+    const teams = await fetchTeams(true);
+    list.innerHTML = '';
+    if (!teams.length) {
+      list.innerHTML = '<p class="muted">No teams yet.</p>';
+      return;
+    }
+    teams.forEach((name) => {
+      const row = document.createElement('div');
+      row.className = 'list-row';
+      row.innerHTML = `
+        <div class="list-row-head">
+          <span class="list-row-title">${escapeHtml(name)}</span>
+          <button type="button" class="btn ghost delete-team-btn">Remove</button>
+        </div>
+      `;
+      row.querySelector('.delete-team-btn').addEventListener('click', async () => {
+        try {
+          await adminApiCall('/admin-teams', { method: 'DELETE', body: JSON.stringify({ name }) });
+          toast('Team removed');
+          loadTeamsList();
+        } catch (err) { toast(err.message); }
+      });
+      list.appendChild(row);
+    });
+  } catch (err) {
+    list.innerHTML = `<p class="status-line err">${err.message}</p>`;
+  }
+}
+
+el('addTeamForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const status = el('addTeamStatus');
+  const name = el('newTeamName').value.trim();
+  if (!name) return;
+  status.textContent = 'Adding…';
+  status.className = 'status-line loading';
+  try {
+    await adminApiCall('/admin-teams', { method: 'POST', body: JSON.stringify({ name }) });
+    status.textContent = 'Team added ✓';
+    status.className = 'status-line ok';
+    el('addTeamForm').reset();
+    loadTeamsList();
+  } catch (err) {
+    status.textContent = err.message;
+    status.className = 'status-line err';
+  }
+});
+
 /* ---- Appearance drawer ---- */
 const themeOverlay = el('themeOverlay');
 el('themeBtn').addEventListener('click', () => {
@@ -1003,39 +1475,220 @@ el('resetThemeBtn').addEventListener('click', () => {
   toast('Appearance reset to default');
 });
 
-/* ---- Admin orders dashboard ---- */
-const ordersDashboardOverlay = el('ordersDashboardOverlay');
-el('ordersDashboardBtn').addEventListener('click', () => {
-  ordersDashboardOverlay.classList.remove('hidden');
-  loadOrdersDashboard();
-});
-el('closeOrdersDashboard').addEventListener('click', () => ordersDashboardOverlay.classList.add('hidden'));
-ordersDashboardOverlay.addEventListener('click', (e) => {
-  if (e.target === ordersDashboardOverlay) ordersDashboardOverlay.classList.add('hidden');
-});
-el('refreshOrdersDashboard').addEventListener('click', loadOrdersDashboard);
+/* ---- Orders dashboard: persistent panel, drill-down by status ---- */
+let dashboardData = null;
+let dashboardOpenStatus = null; // which status row is currently expanded
 
-async function loadOrdersDashboard() {
-  const box = el('ordersDashboardContent');
+el('refreshDashboardPanel').addEventListener('click', loadDashboardPanel);
+
+async function loadDashboardPanel() {
+  const box = el('dashboardPanelContent');
   box.innerHTML = '<p class="muted">Loading…</p>';
   try {
-    const data = await adminApiCall('/admin-orders');
-    const statuses = Object.entries(data.byStatus || {}).sort((a,b) => b[1]-a[1]);
-    const teams = Object.entries(data.byTeam || {}).sort((a,b) => b[1]-a[1]);
-    const teamStatus = data.byTeamStatus || {};
-    box.innerHTML = `
-      <div class="dashboard-card"><h3>Total orders</h3><strong>${data.total || 0}</strong></div>
-      <div class="dashboard-card"><h3>By status</h3>${statuses.map(([s,n]) => `<div class="dash-row"><span>${escapeHtml(s)}</span><b>${n}</b></div>`).join('')}</div>
-      <div class="dashboard-card"><h3>By team</h3>${teams.map(([t,n]) => `<div class="dash-row"><span>${escapeHtml(t)}</span><b>${n}</b></div>`).join('')}</div>
-      <div class="dashboard-card"><h3>Team + status</h3>${teams.map(([t]) => `
-        <div class="dash-team"><b>${escapeHtml(t)}</b>
-          ${Object.entries(teamStatus[t] || {}).sort((a,b)=>b[1]-a[1]).map(([s,n]) => `<div class="dash-row"><span>${escapeHtml(s)}</span><b>${n}</b></div>`).join('')}
-        </div>`).join('')}</div>
-    `;
+    dashboardData = await authedApiCall('/admin-orders');
+    renderDashboardPanel();
   } catch (err) {
     box.innerHTML = `<p class="status-line err">${escapeHtml(err.message)}</p>`;
   }
 }
+
+function renderDashboardPanel() {
+  const box = el('dashboardPanelContent');
+  const data = dashboardData;
+  if (!data) return;
+
+  const statuses = Object.entries(data.byStatus || {}).sort((a, b) => b[1] - a[1]);
+  const teams = Object.entries(data.byTeam || {}).sort((a, b) => b[1] - a[1]);
+  const teamStatus = data.byTeamStatus || {};
+
+  box.innerHTML = `
+    <div class="dashboard-card"><h3>Total orders</h3><strong>${data.total || 0}</strong></div>
+    <div class="dashboard-card">
+      <h3>By status — tap to see orders</h3>
+      <div id="dashboardStatusRows"></div>
+    </div>
+    <div class="dashboard-card"><h3>By team</h3>${teams.map(([t, n]) => `<div class="dash-row"><span>${escapeHtml(t)}</span><b>${n}</b></div>`).join('')}</div>
+    <div class="dashboard-card"><h3>Team + status</h3>${teams.map(([t]) => `
+      <div class="dash-team"><b>${escapeHtml(t)}</b>
+        ${Object.entries(teamStatus[t] || {}).sort((a, b) => b[1] - a[1]).map(([s, n]) => `<div class="dash-row"><span>${escapeHtml(s)}</span><b>${n}</b></div>`).join('')}
+      </div>`).join('')}</div>
+  `;
+
+  const rowsWrap = el('dashboardStatusRows');
+  statuses.forEach(([s, n]) => {
+    const isOpen = dashboardOpenStatus === s;
+    const group = document.createElement('div');
+    group.className = 'dash-status-group';
+    group.innerHTML = `
+      <button type="button" class="dash-row dash-row-clickable">
+        <span>${escapeHtml(s)}</span><b>${n} ${isOpen ? '▲' : '▼'}</b>
+      </button>
+      <div class="dash-orders-list ${isOpen ? '' : 'hidden'}"></div>
+    `;
+    group.querySelector('.dash-row-clickable').addEventListener('click', () => {
+      dashboardOpenStatus = isOpen ? null : s;
+      renderDashboardPanel();
+    });
+    if (isOpen) {
+      const listWrap = group.querySelector('.dash-orders-list');
+      const matches = (data.orders || []).filter((o) => o.status === s);
+      listWrap.innerHTML = matches.map((o) => `
+        <div class="dash-order-row">
+          <span class="dash-order-id">${escapeHtml(o.orderId)}</span>
+          <span class="dash-order-team">${escapeHtml(o.team)}</span>
+          <button type="button" class="btn ghost copy-order-btn" data-order="${escapeHtml(o.orderId)}">Copy</button>
+        </div>
+      `).join('');
+      listWrap.querySelectorAll('.copy-order-btn').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const orderId = btn.dataset.order;
+          if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(orderId).then(() => toast('Copied ' + orderId)).catch(() => toast('Could not copy'));
+          } else {
+            toast('Copy not supported on this browser');
+          }
+        });
+      });
+    }
+    rowsWrap.appendChild(group);
+  });
+}
+
+/* ---- Manage Statuses drawer (admin-only: sequence + per-status Auto-approve/View-only) ---- */
+const permissionsOverlay = el('permissionsOverlay');
+el('permissionsBtn').addEventListener('click', () => {
+  permissionsOverlay.classList.remove('hidden');
+  loadPermissionsList();
+});
+el('closePermissions').addEventListener('click', () => permissionsOverlay.classList.add('hidden'));
+permissionsOverlay.addEventListener('click', (e) => {
+  if (e.target === permissionsOverlay) permissionsOverlay.classList.add('hidden');
+});
+
+function statusPermRow(s, extraClass) {
+  const row = document.createElement('div');
+  row.className = 'list-row' + (extraClass ? ' ' + extraClass : '');
+  row.innerHTML = `
+    <div class="list-row-head">
+      <span class="list-row-title">${escapeHtml(s.name)}</span>
+      <div class="seq-reorder-btns"></div>
+    </div>
+    <label class="checkbox-row"><input type="checkbox" class="auto-approve-toggle" ${s.autoApprove ? 'checked' : ''}> Auto-approve (skips Pending Edits)</label>
+    <label class="checkbox-row"><input type="checkbox" class="view-only-toggle" ${s.viewOnly ? 'checked' : ''}> View only (technicians can't edit orders in this status)</label>
+  `;
+  row.querySelector('.auto-approve-toggle').addEventListener('change', async (e) => {
+    try {
+      await adminApiCall('/admin-permissions', { method: 'PATCH', body: JSON.stringify({ name: s.name, autoApprove: e.target.checked }) });
+      toast('Updated');
+    } catch (err) { toast(err.message); e.target.checked = !e.target.checked; }
+  });
+  row.querySelector('.view-only-toggle').addEventListener('change', async (e) => {
+    try {
+      await adminApiCall('/admin-permissions', { method: 'PATCH', body: JSON.stringify({ name: s.name, viewOnly: e.target.checked }) });
+      toast('Updated');
+    } catch (err) { toast(err.message); e.target.checked = !e.target.checked; }
+  });
+  return row;
+}
+
+async function loadPermissionsList() {
+  const seqList = el('sequenceList');
+  const probRow = el('problematicRow');
+  const unconfList = el('unconfiguredList');
+  seqList.innerHTML = '<p class="muted">Loading…</p>';
+  probRow.innerHTML = '';
+  unconfList.innerHTML = '';
+  try {
+    const data = await adminApiCall('/admin-permissions');
+    const byName = (name) => data.statuses.find((s) => s.name.toLowerCase() === name.toLowerCase());
+    seqList.innerHTML = '';
+
+    if (!data.sequence.length) {
+      seqList.innerHTML = '<p class="muted">No sequence yet — add a status below.</p>';
+    }
+    data.sequence.forEach((name, i) => {
+      const s = byName(name);
+      if (!s) return;
+      const row = statusPermRow(s);
+      const btns = row.querySelector('.seq-reorder-btns');
+      const upBtn = document.createElement('button');
+      upBtn.type = 'button'; upBtn.className = 'icon-btn'; upBtn.textContent = '↑'; upBtn.disabled = i === 0;
+      upBtn.addEventListener('click', () => reorderSequence(data.sequence, i, i - 1));
+      const downBtn = document.createElement('button');
+      downBtn.type = 'button'; downBtn.className = 'icon-btn'; downBtn.textContent = '↓'; downBtn.disabled = i === data.sequence.length - 1;
+      downBtn.addEventListener('click', () => reorderSequence(data.sequence, i, i + 1));
+      const removeBtn = document.createElement('button');
+      removeBtn.type = 'button'; removeBtn.className = 'icon-btn'; removeBtn.textContent = '✕'; removeBtn.title = 'Remove from sequence';
+      removeBtn.addEventListener('click', async () => {
+        try {
+          await adminApiCall('/admin-permissions', { method: 'POST', body: JSON.stringify({ action: 'removeFromSequence', name }) });
+          toast('Removed from sequence');
+          loadPermissionsList();
+        } catch (err) { toast(err.message); }
+      });
+      btns.append(upBtn, downBtn, removeBtn);
+      seqList.appendChild(row);
+    });
+
+    const problematic = byName('Problematic');
+    if (problematic) probRow.appendChild(statusPermRow(problematic));
+
+    if (!data.unconfiguredFromSheet.length) {
+      unconfList.innerHTML = '<p class="muted">None right now.</p>';
+    } else {
+      data.unconfiguredFromSheet.forEach((name) => {
+        const row = document.createElement('div');
+        row.className = 'list-row';
+        row.innerHTML = `<div class="list-row-head"><span class="list-row-title">${escapeHtml(name)}</span></div>`;
+        const addBtn = document.createElement('button');
+        addBtn.type = 'button'; addBtn.className = 'btn ghost'; addBtn.textContent = 'Add to sequence';
+        addBtn.addEventListener('click', () => addStatusToSequence(name));
+        row.querySelector('.list-row-head').appendChild(addBtn);
+        unconfList.appendChild(row);
+      });
+    }
+  } catch (err) {
+    seqList.innerHTML = `<p class="status-line err">${err.message}</p>`;
+  }
+}
+
+async function reorderSequence(currentSequence, from, to) {
+  const order = [...currentSequence];
+  const [moved] = order.splice(from, 1);
+  order.splice(to, 0, moved);
+  try {
+    await adminApiCall('/admin-permissions', { method: 'POST', body: JSON.stringify({ action: 'reorder', order }) });
+    loadPermissionsList();
+  } catch (err) { toast(err.message); }
+}
+
+async function addStatusToSequence(name) {
+  try {
+    await adminApiCall('/admin-permissions', { method: 'POST', body: JSON.stringify({ action: 'addStatus', name }) });
+    toast('Added to sequence');
+    loadPermissionsList();
+    refreshAdminBaseStatusList();
+  } catch (err) { toast(err.message); }
+}
+
+el('addStatusForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const input = el('newStatusName');
+  const name = input.value.trim();
+  const status = el('addStatusStatus');
+  if (!name) return;
+  try {
+    await adminApiCall('/admin-permissions', { method: 'POST', body: JSON.stringify({ action: 'addStatus', name }) });
+    input.value = '';
+    status.textContent = '';
+    toast('Status added');
+    loadPermissionsList();
+    refreshAdminBaseStatusList();
+  } catch (err) {
+    status.textContent = err.message;
+    status.className = 'status-line err';
+  }
+});
 
 /* ---- Pending edits drawer ---- */
 const pendingEditsOverlay = el('pendingEditsOverlay');
@@ -1080,8 +1733,8 @@ async function loadPendingEditsList() {
             <button type="button" class="btn primary approve-btn">Approve</button>
             <button type="button" class="btn ghost reject-btn">Reject</button>
           </div>` : `
-          <div class="list-row-diff">Approved update: ${escapeHtml(ed.newDesc)} · ${escapeHtml(ed.newStatus)}</div>
-          <div class="list-row-sub">Resolved by ${escapeHtml(ed.resolvedBy)} · ${ed.resolvedAt ? new Date(ed.resolvedAt).toLocaleString() : ''}</div>`}
+          <div class="list-row-diff">${ed.status === 'auto-approved' ? 'Auto-approved update' : 'Approved update'}: ${escapeHtml(ed.newDesc)} · ${escapeHtml(ed.newStatus)}</div>
+          <div class="list-row-sub">${ed.status === 'auto-approved' ? 'Applied automatically' : 'Resolved by ' + escapeHtml(ed.resolvedBy)} · ${ed.resolvedAt ? new Date(ed.resolvedAt).toLocaleString() : ''}</div>`}
       `;
       if (ed.status === 'pending') {
         row.querySelector('.edit-pending-btn').addEventListener('click', async () => {
@@ -1177,7 +1830,7 @@ window.addEventListener('load', () => {
   restoreAdminSession(); // instant — no need to wait for the Google script
   refreshView();
   maybeShowIOSInstallHint();
-  if (accessToken) loadKnownStatuses();
+  if (accessToken) { loadKnownStatuses(); refreshAdminBaseStatusList(); }
   if (techToken) {
     loadMyEdits();
     loadTechOrdersByStatus();
