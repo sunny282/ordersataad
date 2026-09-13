@@ -1,5 +1,5 @@
 {
-  "name": "Order Update",
+  "name": "Order Update by Saqlain",
   "short_name": "Orders",
   "description": "Update field order status and notes directly in Google Sheets",
   "start_url": "./index.html",
