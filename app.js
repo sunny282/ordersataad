@@ -157,7 +157,7 @@ function refreshView() {
     signedOut.classList.add('hidden');
     signedIn.classList.add('hidden');
     coordSignedIn.classList.remove('hidden');
-    el('coordWhoAmI').textContent = (coordSession.fullName || coordSession.username) + ' · ' + (coordSession.teams || []).join(', ');
+    el('coordWhoAmI').textContent = coordSession.fullName || coordSession.username;
     settingsBtn.classList.add('hidden');
     adminToolsBtns.classList.remove('hidden');
     adminOnlyEls.forEach((e) => e.classList.add('hidden'));
